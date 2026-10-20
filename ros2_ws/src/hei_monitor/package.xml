@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>hei_monitor</name><version>0.2.0</version>
+  <description>Rust ROS 2 subscriber and read-only Axum web monitor</description>
+  <maintainer email="maintainers@example.invalid">easeBot maintainers</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cargo</buildtool_depend>
+  <!-- rclrs 0.7 vendors bindings for these packages and links their C typesupport. -->
+  <depend>rcl</depend><depend>rcl_action</depend><depend>rcl_yaml_param_parser</depend>
+  <depend>rmw_implementation</depend><depend>rcutils</depend>
+  <depend>action_msgs</depend><depend>builtin_interfaces</depend><depend>example_interfaces</depend>
+  <depend>rcl_interfaces</depend><depend>rosgraph_msgs</depend><depend>unique_identifier_msgs</depend>
+  <depend>test_msgs</depend>
+  <depend>sensor_msgs</depend><depend>nav_msgs</depend><depend>diagnostic_msgs</depend>
+  <export><build_type>ament_cargo</build_type></export>
+</package>

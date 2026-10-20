@@ -1,0 +1,114 @@
+/**/controller_manager:
+  ros__parameters:
+    update_rate: 50
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    right_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    left_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    right_gripper_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    left_gripper_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    lift_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    base_controller:
+      type: omni_wheel_drive_controller/OmniWheelDriveController
+    enforce_command_limits: true
+/**/right_arm_controller:
+  ros__parameters:
+    joints:
+    - a_right_joint1
+    - a_right_joint2
+    - a_right_joint3
+    - a_right_joint4
+    - a_right_joint5
+    - a_right_joint6
+    command_interfaces:
+    - position
+    state_interfaces:
+    - position
+    - velocity
+    allow_partial_joints_goal: false
+    interpolate_from_desired_state: false
+    constraints:
+      goal_time: 2.0
+      stopped_velocity_tolerance: 0.05
+/**/left_arm_controller:
+  ros__parameters:
+    joints:
+    - b_left_joint1
+    - b_left_joint2
+    - b_left_joint3
+    - b_left_joint4
+    - b_left_joint5
+    - b_left_joint6
+    command_interfaces:
+    - position
+    state_interfaces:
+    - position
+    - velocity
+    allow_partial_joints_goal: false
+    interpolate_from_desired_state: false
+    constraints:
+      goal_time: 2.0
+      stopped_velocity_tolerance: 0.05
+/**/right_gripper_controller:
+  ros__parameters:
+    joints:
+    - a_right_end_joint_L_finger
+    command_interfaces:
+    - position
+    state_interfaces:
+    - position
+    - velocity
+    allow_partial_joints_goal: false
+    interpolate_from_desired_state: false
+    constraints:
+      goal_time: 2.0
+      stopped_velocity_tolerance: 0.05
+/**/left_gripper_controller:
+  ros__parameters:
+    joints:
+    - b_left_end_joint_L_finger
+    command_interfaces:
+    - position
+    state_interfaces:
+    - position
+    - velocity
+    allow_partial_joints_goal: false
+    interpolate_from_desired_state: false
+    constraints:
+      goal_time: 2.0
+      stopped_velocity_tolerance: 0.05
+/**/lift_controller:
+  ros__parameters:
+    joints:
+    - lift_joint
+    command_interfaces:
+    - position
+    state_interfaces:
+    - position
+    - velocity
+    allow_partial_joints_goal: false
+    interpolate_from_desired_state: false
+    constraints:
+      goal_time: 2.0
+      stopped_velocity_tolerance: 0.05
+/**/base_controller:
+  ros__parameters:
+    wheel_names:
+    - front_left_wheel_joint
+    - rear_left_wheel_joint
+    - rear_right_wheel_joint
+    - front_right_wheel_joint
+    wheel_offset: 0.7853981633974483
+    robot_radius: 0.3162
+    wheel_radius: 0.05
+    position_feedback: false
+    open_loop: false
+    enable_odom_tf: false
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    cmd_vel_timeout: 0.3

@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(hei_description)
+find_package(ament_cmake REQUIRED)
+install(DIRECTORY urdf meshes rviz DESTINATION share/${PROJECT_NAME})
+install(FILES LICENSE.upstream SOURCE.md DESTINATION share/${PROJECT_NAME})
+ament_package()

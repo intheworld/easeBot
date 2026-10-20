@@ -1,0 +1,17 @@
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+log/
+
+# colcon-generated Rust message paths and Cargo build output
+.cargo/config.toml
+target/
+
+.deps/

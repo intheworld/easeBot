@@ -1,0 +1,19 @@
+Panels:
+  - Class: rviz_common/Displays
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Fixed Frame: base_footprint
+  Displays:
+    - Class: rviz_default_plugins/RobotModel
+      Name: HEI Robot
+      Description Source: Topic
+      Description Topic:
+        Value: /hei/robot_description
+    - Class: rviz_default_plugins/TF
+      Name: TF
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 3.0
+      Focal Point: {X: 0.0, Y: 0.0, Z: 0.6}
