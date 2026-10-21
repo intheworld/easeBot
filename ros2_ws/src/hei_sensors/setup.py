@@ -1,7 +1,7 @@
 from setuptools import find_packages, setup
 setup(name="hei_sensors", version="0.1.0", packages=find_packages(),
       data_files=[("share/ament_index/resource_index/packages", ["resource/hei_sensors"]),
-                  ("share/hei_sensors", ["package.xml"])],
+                  ("share/hei_sensors", ["package.xml", "README.md"])],
       package_data={"hei_sensors": ["web/*"]},
       install_requires=["setuptools"], zip_safe=False,
       maintainer="easeBot maintainers", maintainer_email="maintainers@example.invalid",

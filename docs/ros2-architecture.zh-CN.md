@@ -28,7 +28,7 @@ flowchart TB
 
 主要包边界参考 [ROBOTIS AI Worker](https://github.com/ROBOTIS-GIT/ai_worker/tree/main) 的 description、bringup、控制器与 manager 组织。HEI 采用自己的模型、关节、升降和 O 型全向轮配置，不使用 ROBOTIS 的 DYNAMIXEL 或 swerve 控制器参数。
 
-`controller_manager` 和标准控制器运行控制更新；Python manager 负责启停、状态检查和诊断，不承担电机实时环。`hei_monitor` 已改为原生 Rust/rclrs 节点，只订阅 ROS 数据，与动作通路分离。`ros.rs` 管理订阅，`cache.rs` 管理状态，`http.rs` 使用 Axum 提供只读 API；`main.rs` 启动 ROS executor 线程及 Tokio HTTP 服务。前端静态资源嵌入二进制，launch 入口保持不变。相机节点独立执行，采用 sensor-data QoS 与有界最新图像缓存。
+`controller_manager` 和标准控制器运行控制更新；Python manager 负责启停、状态检查和诊断，不承担电机实时环。`hei_monitor` 已改为原生 Rust/rclrs 节点，只订阅 ROS 数据，与动作通路分离。`ros.rs` 管理订阅，`cache.rs` 管理状态，`http.rs` 使用 Axum 提供只读 API；`main.rs` 启动 ROS executor 线程及 Tokio HTTP 服务。前端静态资源嵌入二进制，launch 入口保持不变。相机节点独立执行，采用 sensor-data QoS 与有界最新图像缓存。`hei_sensors` 已使用 rclpy LifecycleNode，三路共用生命周期；configure 打开设备，activate 才开始采集发布，deactivate 停止采集，cleanup 关闭设备。普通诊断发布器在非 active 状态仍工作。默认 bringup 自动 configure/activate 一次。
 
 ## 当前实现
 
@@ -37,7 +37,7 @@ flowchart TB
 | hei_description | 原始 HEI 几何/运动学、21 个可动关节、19 个独立命令接口、TF、RViz | 已实现；模型来源与改动随包记录 |
 | hei_control | 双臂各六关节、两只夹爪、升降 JTC 与全向底盘控制器 | mock 配置已启动验证 |
 | hei_robot_manager | ListControllers/SwitchController 管理、显式启停、陈旧反馈时请求停用、diagnostics | Python 原生 ROS 节点 |
-| hei_sensors | 三路模拟或 OpenCV 相机、Image/CompressedImage、逐相机诊断 | 模拟已联调；真实相机未连接验证 |
+| hei_sensors | 三路模拟或 OpenCV 相机、Image/CompressedImage、逐相机诊断 | LifecycleNode；模拟和转换流程已联调，真实相机未连接验证 |
 | hei_monitor | JointState、Odometry、图像和 diagnostics 订阅及只读 HTTP | Rust/rclrs + Axum；无控制 publisher/client |
 | hei_bringup | robot_state_publisher、controller_manager、spawner 和本地节点统一启动 | 默认 motion inactive；关键节点退出时结束 launch |
 

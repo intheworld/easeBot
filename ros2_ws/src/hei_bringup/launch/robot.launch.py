@@ -9,7 +9,7 @@ from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
 import xacro
 
 MOTION = ['right_arm_controller', 'left_arm_controller', 'right_gripper_controller',
@@ -35,7 +35,8 @@ def setup(context):
                   arguments=MOTION + ['--inactive', '--controller-manager', manager_path,
                                       '--controller-manager-timeout', '30'], output='screen')
     manager = Node(package='hei_robot_manager', executable='robot_manager', namespace=namespace, output='screen')
-    cameras = Node(package='hei_sensors', executable='cameras', namespace=namespace, output='screen',
+    cameras = LifecycleNode(package='hei_sensors', executable='cameras', name='cameras',
+                            namespace=namespace, output='screen', autostart=True,
                    parameters=[{'backend': LaunchConfiguration('camera_backend'), 'fps': 10.0}])
     monitor = Node(package='hei_monitor', executable='monitor', namespace=namespace, output='screen',
                    condition=IfCondition(LaunchConfiguration('monitor')),

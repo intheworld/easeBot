@@ -20,7 +20,9 @@ from controller_manager_msgs.srv import ListControllers, SwitchController
 from control_msgs.action import FollowJointTrajectory
 from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import TwistStamped
-from sensor_msgs.msg import JointState, CompressedImage
+from lifecycle_msgs.msg import State, Transition
+from lifecycle_msgs.srv import ChangeState, GetState
+from sensor_msgs.msg import JointState, CompressedImage, Image
 from std_srvs.srv import SetBool, Trigger
 from tf2_msgs.msg import TFMessage
 from trajectory_msgs.msg import JointTrajectoryPoint
@@ -50,6 +52,14 @@ def test_native_launch_controls_topics_stop_and_readonly_monitor():
                 node.create_subscription(JointState, '/hei/joint_states', states.append, qos_profile_sensor_data)
                 node.create_subscription(CompressedImage, '/hei/cameras/front/image_raw/compressed', images.append, qos_profile_sensor_data)
                 node.create_subscription(TFMessage, '/tf', transforms.append, 10)
+                camera_images = {'front': images, 'left_wrist': [], 'right_wrist': []}
+                for name in ('left_wrist', 'right_wrist'):
+                    node.create_subscription(CompressedImage,
+                        f'/hei/cameras/{name}/image_raw/compressed', camera_images[name].append,
+                        qos_profile_sensor_data)
+                raw_images = []
+                node.create_subscription(Image, '/hei/cameras/front/image_raw', raw_images.append,
+                                         qos_profile_sensor_data)
                 listing = node.create_client(ListControllers, '/hei/controller_manager/list_controllers')
 
                 def spin_until(condition, timeout=10):
@@ -92,6 +102,40 @@ def test_native_launch_controls_topics_stop_and_readonly_monitor():
                 assert images[-1].header.frame_id == 'front_camera_optical_frame'
                 assert bytes(images[-1].data).startswith(b'\xff\xd8')
                 assert any(t.child_frame_id == 'a_right_link1' for msg in transforms for t in msg.transforms)
+                # Bringup autostarts the LifecycleNode once; manual deactivate must persist.
+                camera_state = node.create_client(GetState, '/hei/cameras/get_state')
+                camera_change = node.create_client(ChangeState, '/hei/cameras/change_state')
+                assert call(camera_state, GetState.Request()).current_state.id == State.PRIMARY_STATE_ACTIVE
+                spin_until(lambda: all(camera_images.values()) and raw_images)
+
+                def camera_transition(transition, expected):
+                    request = ChangeState.Request()
+                    request.transition.id = transition
+                    assert call(camera_change, request).success
+                    assert call(camera_state, GetState.Request()).current_state.id == expected
+
+                camera_transition(Transition.TRANSITION_DEACTIVATE, State.PRIMARY_STATE_INACTIVE)
+                drain_until = time.monotonic() + 0.3
+                spin_until(lambda: time.monotonic() >= drain_until)
+                counts = {name: len(frames) for name, frames in camera_images.items()}
+                raw_count = len(raw_images)
+                pause_until = time.monotonic() + 1.3
+                spin_until(lambda: time.monotonic() >= pause_until)
+                assert {name: len(frames) for name, frames in camera_images.items()} == counts
+                assert len(raw_images) == raw_count
+                with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/v1/status', timeout=2) as response:
+                    paused = json.load(response)
+                assert all(not c['valid'] for c in paused['sensors']['data']['cameras'].values())
+                camera_transition(Transition.TRANSITION_ACTIVATE, State.PRIMARY_STATE_ACTIVE)
+                spin_until(lambda: all(len(camera_images[name]) > count for name, count in counts.items())
+                           and len(raw_images) > raw_count)
+                # Also exercise resource destruction and configure again in the same process.
+                camera_transition(Transition.TRANSITION_DEACTIVATE, State.PRIMARY_STATE_INACTIVE)
+                camera_transition(Transition.TRANSITION_CLEANUP, State.PRIMARY_STATE_UNCONFIGURED)
+                camera_transition(Transition.TRANSITION_CONFIGURE, State.PRIMARY_STATE_INACTIVE)
+                camera_transition(Transition.TRANSITION_ACTIVATE, State.PRIMARY_STATE_ACTIVE)
+                camera_images['front'].clear()
+                spin_until(lambda: camera_images['front'])
                 action = ActionClient(node, FollowJointTrajectory, '/hei/right_arm_controller/follow_joint_trajectory')
                 assert action.wait_for_server(timeout_sec=10)
                 goal = FollowJointTrajectory.Goal()

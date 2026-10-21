@@ -11,7 +11,7 @@ ros2_ws/src/
   hei_description/      HEI URDF、30 个原始网格、TF 与 RViz 配置
   hei_control/          ros2_control 双臂、夹爪、升降与全向底盘控制器配置
   hei_robot_manager/    控制器启停、反馈检查与 diagnostics
-  hei_sensors/          三相机 Image / CompressedImage 与诊断
+  hei_sensors/          三相机生命周期节点、图像与持续诊断
   hei_monitor/          Rust ROS 节点、状态缓存与 Axum 只读 Web
   hei_bringup/          统一 launch
 ```
@@ -52,6 +52,17 @@ ros2 launch hei_bringup robot.launch.py camera_backend:=opencv
 ```
 
 `opencv` 只切换相机，电机仍为 mock。当前默认设备为 `/dev/hei_front_camera`、`/dev/hei_left_wrist_camera`、`/dev/hei_right_wrist_camera`，可用相机节点参数配置。相机不能同时被旧 HEI host 打开。相机内外参未验证，因此当前不发布虚构的已标定 CameraInfo。
+
+`hei_sensors` 是三路共享状态的 LifecycleNode。默认 bringup 自动 configure/activate；手动停用后不会自动重启采集。停止、恢复和重新配置方式：
+
+```bash
+ros2 lifecycle get /hei/cameras
+ros2 lifecycle set /hei/cameras deactivate
+ros2 lifecycle set /hei/cameras activate
+# 需要关闭设备并修改配置时：deactivate → cleanup → 修改参数 → configure → activate
+```
+
+图像仅 active 时发布，诊断在 inactive/unconfigured 时仍可用；monitor 会将停止更新的图像标记为过期。OpenCV configure 任一路设备打开失败时回滚全部设备，停留在 unconfigured。详情见 [相机生命周期说明](ros2_ws/src/hei_sensors/README.md)。
 
 RViz 配置默认使用 `/hei/robot_description`；自定义 namespace 时需在 RViz 中选择相应 description topic。没有定位系统，默认不发布 `map → odom` 或 `odom → base_footprint`。
 
@@ -107,7 +118,7 @@ cargo test --locked --manifest-path ros2_ws/src/hei_monitor/Cargo.toml \
 python3 -m pytest -q ros2_ws/tests
 ```
 
-已在本机完成六包 colcon 构建、3 个 Rust 缓存单元测试、2 个模型测试和 1 个 ROS 2 端到端测试；Rust monitor 另验证了端口冲突失败与 SIGTERM 正常退出。端到端覆盖：控制器默认 inactive、未启用时拒绝轨迹、显式启用后 action 成功、joint_states/TF/图像发布、底盘超时归零、停止后 inactive、Web 写方法拒绝。测试启动独立 ROS domain，结束时关闭节点。不是实机硬件测试，也未验证实时调度。
+已在本机完成六包 colcon 构建、3 个 Rust 缓存单元测试、3 个相机生命周期/资源测试、2 个模型测试和 1 个 ROS 2 端到端测试；Rust monitor 另验证了端口冲突失败与 SIGTERM 正常退出。端到端覆盖：控制器默认 inactive、未启用时拒绝轨迹、显式启用后 action 成功、joint_states/TF/图像发布、底盘超时归零、停止后 inactive、Web 写方法拒绝、相机默认激活及手动停用/恢复/清理后重配。测试启动独立 ROS domain，结束时关闭节点。不是实机硬件测试，也未验证实时调度。
 
 模型来源和 mock 限值修改见 [模型来源记录](/home/cw/gitdir/easeBot/ros2_ws/src/hei_description/SOURCE.md)，上游许可随包保留。原始几何与运动学来自 HEI 仓库；零速度/力限位被替换为用于 mock 的临时值，不能作为实机额定值。
 

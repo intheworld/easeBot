@@ -10,5 +10,7 @@
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
   <export><build_type>ament_python</build_type></export>
 </package>
