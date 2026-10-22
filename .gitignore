@@ -8,6 +8,9 @@ dist/
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
+ros2_ws/build-*/
+ros2_ws/install-*/
+ros2_ws/log-*/
 log/
 
 # colcon-generated Rust message paths and Cargo build output
@@ -16,3 +19,8 @@ target/
 
 .deps/
 .vscode/
+
+# Per-machine SSH targets and runtime configuration
+deploy/*.local.json
+deploy/*.local.yaml
+deploy/*.local.yml

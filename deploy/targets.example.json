@@ -1,0 +1,12 @@
+{
+  "robot": {
+    "host": "hei-robot",
+    "path": "/home/robot/dev/easeBot",
+    "ros_distro": "jazzy"
+  },
+  "server": {
+    "host": "hei-server",
+    "path": "/home/developer/dev/easeBot",
+    "ros_distro": "jazzy"
+  }
+}

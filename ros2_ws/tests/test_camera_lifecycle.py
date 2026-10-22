@@ -45,6 +45,41 @@ class FakeCapture:
         self.released = True
 
 
+def test_explicit_capture_format_and_rollback(camera, monkeypatch):
+    import cv2
+    opened, accepted = [], [True]
+
+    class FormatCapture(FakeCapture):
+        def set(self, prop, value):
+            if prop == cv2.CAP_PROP_FOURCC:
+                self.code = value
+                return accepted[0]
+            return True
+
+        def get(self, prop):
+            return self.code
+
+    def open_capture(device, api):
+        assert api == cv2.CAP_V4L2
+        capture = FormatCapture(opened=True)
+        opened.append(capture)
+        return capture
+
+    monkeypatch.setattr('hei_sensors.cameras.cv2.VideoCapture', open_capture)
+    camera.set_parameters([Parameter('backend', value='opencv'), Parameter('capture_api', value='v4l2'),
+                           Parameter('left_wrist_fourcc', value='MJPG')])
+    assert camera.trigger_configure() == Return.SUCCESS
+    assert opened[1].code == cv2.VideoWriter_fourcc(*'MJPG')
+    assert not camera.set_parameters([Parameter('left_wrist_fourcc', value='YUYV')])[0].successful
+    assert camera.trigger_cleanup() == Return.SUCCESS
+    assert all(cap.released for cap in opened)
+    accepted[0] = False
+    opened.clear()
+    assert camera.trigger_configure() == Return.FAILURE
+    assert all(cap.released for cap in opened)
+    assert not camera.captures
+
+
 def test_capture_starts_only_when_active_and_cleanup_releases_devices(camera, monkeypatch):
     captures = []
     def open_capture(_):

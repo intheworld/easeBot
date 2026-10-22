@@ -17,5 +17,6 @@
   <exec_depend>hei_sensors</exec_depend>
   <exec_depend>hei_monitor</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>hei_agent_bridge</exec_depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

@@ -42,6 +42,10 @@ def setup(context):
                    condition=IfCondition(LaunchConfiguration('monitor')),
                    parameters=[{'host': LaunchConfiguration('monitor_host'),
                                 'port': int(LaunchConfiguration('monitor_port').perform(context))}])
+    agent_bridge = Node(package='hei_agent_bridge', executable='agent_bridge', namespace=namespace,
+                        output='screen', condition=IfCondition(LaunchConfiguration('agent_bridge')),
+                        parameters=[{'hub_url': LaunchConfiguration('agent_hub_url'),
+                                     'device_id': LaunchConfiguration('agent_device_id')}])
     rviz = Node(package='rviz2', executable='rviz2', condition=IfCondition(LaunchConfiguration('rviz')),
                 arguments=['-d', str(description / 'rviz/hei.rviz')], output='screen')
 
@@ -56,7 +60,7 @@ def setup(context):
     for critical in (control, rsp, manager):
         actions.append(RegisterEventHandler(OnProcessExit(target_action=critical,
                        on_exit=[EmitEvent(event=Shutdown(reason='critical robot service exited'))])))
-    return actions + [rsp, control, states, manager, cameras, monitor, rviz]
+    return actions + [rsp, control, states, manager, cameras, monitor, agent_bridge, rviz]
 
 
 def generate_launch_description():
@@ -66,6 +70,9 @@ def generate_launch_description():
         DeclareLaunchArgument('monitor', default_value='true'),
         DeclareLaunchArgument('monitor_host', default_value='127.0.0.1'),
         DeclareLaunchArgument('monitor_port', default_value='8081'),
+        DeclareLaunchArgument('agent_bridge', default_value='false'),
+        DeclareLaunchArgument('agent_hub_url', default_value='ws://127.0.0.1:4180'),
+        DeclareLaunchArgument('agent_device_id', default_value='hei-01'),
         DeclareLaunchArgument('rviz', default_value='false'),
         OpaqueFunction(function=setup),
     ])

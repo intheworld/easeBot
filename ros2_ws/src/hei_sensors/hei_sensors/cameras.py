@@ -31,8 +31,10 @@ class Cameras(LifecycleNode):
         super().__init__('cameras', **kwargs)
         self.declare_parameter('backend', 'mock')
         self.declare_parameter('fps', 10.0)
+        self.declare_parameter('capture_api', 'auto')
         for name in NAMES:
             self.declare_parameter(name + '_device', f'/dev/hei_{name}_camera')
+            self.declare_parameter(name + '_fourcc', '')
         self.backend = 'unknown'
         self.fps = 10.0
         self.phase: CameraPhase = CameraPhase.UNCONFIGURED
@@ -57,7 +59,8 @@ class Cameras(LifecycleNode):
         self.diag_timer = self.create_timer(0.5, self.diagnostics)
 
     def check_parameters(self, parameters):
-        configuration = {'backend', 'fps'} | {n + '_device' for n in NAMES}
+        configuration = {'backend', 'fps', 'capture_api'} | {
+            n + suffix for n in NAMES for suffix in ('_device', '_fourcc')}
         if self.configured and any(p.name in configuration for p in parameters):
             return SetParametersResult(successful=False, reason='cleanup before changing camera configuration')
         return SetParametersResult(successful=True)
@@ -69,12 +72,23 @@ class Cameras(LifecycleNode):
             if self.backend not in ('mock', 'opencv') or not 1 <= self.fps <= 30:
                 raise ValueError('backend must be mock/opencv; fps must be [1,30]')
             if self.backend == 'opencv':
+                api = self.get_parameter('capture_api').value
+                if api not in ('auto', 'v4l2'):
+                    raise ValueError('capture_api must be auto/v4l2')
                 for name in NAMES:
                     device = str(self.get_parameter(name + '_device').value)
-                    cap = cv2.VideoCapture(int(device) if device.isdecimal() else device)
+                    device = int(device) if device.isdecimal() else device
+                    cap = cv2.VideoCapture(device, cv2.CAP_V4L2) if api == 'v4l2' else cv2.VideoCapture(device)
                     self.captures[name] = cap
                     if not cap.isOpened():
                         raise RuntimeError(f'{name}: camera open failed ({device})')
+                    fourcc = self.get_parameter(name + '_fourcc').value
+                    if fourcc:
+                        if not isinstance(fourcc, str) or len(fourcc) != 4 or not fourcc.isascii() or not fourcc.isalnum():
+                            raise ValueError(f'{name}: fourcc must be empty or four ASCII letters/digits')
+                        code = cv2.VideoWriter_fourcc(*fourcc)
+                        if not cap.set(cv2.CAP_PROP_FOURCC, code) or int(cap.get(cv2.CAP_PROP_FOURCC)) != code:
+                            raise RuntimeError(f'{name}: requested camera format {fourcc} is not supported')
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             for name in NAMES:

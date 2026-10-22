@@ -1,0 +1,62 @@
+# Exact upstream sources used for the ARM64/Jazzy project validation.
+repositories:
+  ros2_control:
+    type: git
+    url: https://github.com/ros-controls/ros2_control.git
+    version: 6b7fbfd6754eaab00465c6f189133367d7712bdc
+  ros2_controllers:
+    type: git
+    url: https://github.com/ros-controls/ros2_controllers.git
+    version: 9e7dc558404ef98de7191af68b7922d07d358f67
+  control_msgs:
+    type: git
+    url: https://github.com/ros-controls/control_msgs.git
+    version: 2eaaa5440d6dc2291601ea445b83015a663f5f88
+  realtime_tools:
+    type: git
+    url: https://github.com/ros-controls/realtime_tools.git
+    version: 3c9ce676aa49e5a1144df8363f594d1728d07b61
+  ros2_control_cmake:
+    type: git
+    url: https://github.com/ros-controls/ros2_control_cmake.git
+    version: cb788a3f3354902c959c3bf667e293cfc04be2bc
+  generate_parameter_library:
+    type: git
+    url: https://github.com/PickNikRobotics/generate_parameter_library.git
+    version: 056776eb8ac52cfb3a7225b113dc77d3b1bfb82c
+  control_toolbox:
+    type: git
+    url: https://github.com/ros-controls/control_toolbox.git
+    version: 689ec6f911f1f5cb9ef29d9fd9a0abfc769c7224
+  backward_ros:
+    type: git
+    url: https://github.com/pal-robotics/backward_ros.git
+    version: 346ed87fb39d4cce3aee41726bcc50c346aab816
+  pal_statistics:
+    type: git
+    url: https://github.com/pal-robotics/pal_statistics.git
+    version: c24371687668488d832538113db461d608942ad1
+  cpp_polyfills:
+    type: git
+    url: https://github.com/PickNikRobotics/cpp_polyfills.git
+    version: ec186fd32c397c473ed8c93e60bf6837175f8b3c
+  diagnostics:
+    type: git
+    url: https://github.com/ros/diagnostics.git
+    version: ed64dc9c3b9d048b1699cf81692e6b0e3926c3ac
+  RSL:
+    type: git
+    url: https://github.com/PickNikRobotics/RSL.git
+    version: 85805a64e8a5fa216a6271ca0d757ba783cc1ae0
+  filters:
+    type: git
+    url: https://github.com/ros/filters.git
+    version: ef8bad440cb65a54874dbaa8bf39b3acc2c03268
+  angles:
+    type: git
+    url: https://github.com/ros/angles.git
+    version: a96224f9ab3ac51fe8fd981c1e1554528dc4345a
+  xacro:
+    type: git
+    url: https://github.com/ros/xacro.git
+    version: da4b3849f8320903d625250089f67f0632be86f2

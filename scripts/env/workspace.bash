@@ -1,0 +1,13 @@
+# Source after the ROS underlay and before the application's install/setup.bash.
+# Loading dependencies does not install packages or start ROS nodes.
+_hei_workspace_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ -f "$HOME/.cargo/env" ]]; then
+  source "$HOME/.cargo/env"
+fi
+if [[ -d "${_hei_workspace_root}/.deps/build-python" ]]; then
+  export PYTHONPATH="${_hei_workspace_root}/.deps/build-python${PYTHONPATH:+:${PYTHONPATH}}"
+  export PATH="${_hei_workspace_root}/.deps/build-python/bin:$PATH"
+fi
+source "${_hei_workspace_root}/scripts/env/ros-rust.bash"
+source "${_hei_workspace_root}/scripts/env/agent-bridge.bash"
+unset _hei_workspace_root

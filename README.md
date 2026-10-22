@@ -13,6 +13,7 @@ ros2_ws/src/
   hei_robot_manager/    控制器启停、反馈检查与 diagnostics
   hei_sensors/          三相机生命周期节点、图像与持续诊断
   hei_monitor/          Rust ROS 节点、状态缓存与 Axum 只读 Web
+  hei_agent_bridge/     ROS 2 → Agnes MHS/MOS 只读状态与图像接入
   hei_bringup/          统一 launch
 ```
 
@@ -20,14 +21,18 @@ ros2_ws/src/
 
 ## 构建与启动
 
+多机开发可使用 [SSH / rsync 源码同步与远端编译](docs/remote-dev.zh-CN.md)：本机编辑，推送到机器人或服务器的专用开发目录，在目标机器构建，不自动重启节点。
+
+脚本的用途、目录和执行位置见[脚本说明](scripts/README.md)。日常环境统一使用 `source scripts/env/workspace.bash` 加载。
+
 本机已具备 Jazzy。Rust monitor 还需要 Rust 工具链、`colcon-cargo`、`colcon-ros-cargo`、`cargo-ament-build` 和 ROS Rust 消息绑定；详见 [监控包说明](ros2_ws/src/hei_monitor/README.md)。准备依赖后执行：
 
 ```bash
 cd /home/cw/gitdir/easeBot
 source /opt/ros/jazzy/setup.bash
 # 系统未安装 ros-jazzy-test-msgs 时，可无 sudo 解包到工作区 .deps/
-./scripts/prepare-rust-ros.sh
-source scripts/ros-rust-env.bash
+./scripts/setup/prepare-rust-ros.py
+source scripts/env/workspace.bash
 # 新机器可使用 rosdep 检查并安装 package.xml 中的依赖
 # rosdep install --from-paths ros2_ws/src --ignore-src -r -y
 colcon --log-base ros2_ws/log build --base-paths ros2_ws/src \
@@ -65,6 +70,20 @@ ros2 lifecycle set /hei/cameras activate
 图像仅 active 时发布，诊断在 inactive/unconfigured 时仍可用；monitor 会将停止更新的图像标记为过期。OpenCV configure 任一路设备打开失败时回滚全部设备，停留在 unconfigured。详情见 [相机生命周期说明](ros2_ws/src/hei_sensors/README.md)。
 
 RViz 配置默认使用 `/hei/robot_description`；自定义 namespace 时需在 RViz 中选择相应 description topic。没有定位系统，默认不发布 `map → odom` 或 `odom → base_footprint`。
+
+## Agnes Agent 接入
+
+已增加可选的 `hei_agent_bridge`。第一版仅提供机器人状态查询和三路 JPEG 观测，不接受运动命令；不会改变 Web 只读约定。先运行 `./scripts/setup/prepare-agent-bridge.sh` 安装工作区本地 SDK 依赖，再在启动终端 `source scripts/env/agent-bridge.bash`。
+
+```bash
+# 默认连接本机已启用的 AgnesHub；Hub 地址与 Web UI 地址不同
+ros2 launch hei_bringup robot.launch.py agent_bridge:=true \
+  agent_hub_url:=ws://127.0.0.1:4180
+# 或在已经运行的机器人栈旁单独启动
+ros2 run hei_agent_bridge agent_bridge --ros-args -p hub_url:=ws://127.0.0.1:4180
+```
+
+默认不启用。设备 ID 默认 hei-01，ROS namespace 默认 /hei。它作为逻辑只读 observer 注册；MHS stop 不停止外部 ROS 客户端的运动。安装、数据含义与验证见 [bridge 说明](ros2_ws/src/hei_agent_bridge/README.md)。
 
 ## 独立 ROS 2 控制
 
@@ -110,7 +129,7 @@ Web 节点仅创建订阅者，不创建控制 publisher、service client 或 ac
 
 ## 验证
 
-在 source 了 Jazzy、`scripts/ros-rust-env.bash` 和本 workspace 的终端运行：
+在 source 了 Jazzy、`scripts/env/ros-rust.bash` 和本 workspace 的终端运行：
 
 ```bash
 cargo test --locked --manifest-path ros2_ws/src/hei_monitor/Cargo.toml \

@@ -39,6 +39,7 @@ flowchart TB
 | hei_robot_manager | ListControllers/SwitchController 管理、显式启停、陈旧反馈时请求停用、diagnostics | Python 原生 ROS 节点 |
 | hei_sensors | 三路模拟或 OpenCV 相机、Image/CompressedImage、逐相机诊断 | LifecycleNode；模拟和转换流程已联调，真实相机未连接验证 |
 | hei_monitor | JointState、Odometry、图像和 diagnostics 订阅及只读 HTTP | Rust/rclrs + Axum；无控制 publisher/client |
+| hei_agent_bridge | 将 ROS 状态和 JPEG 适配为 Agnes MHS/MOS 设备 | 可选只读 observer，无机器人控制接口 |
 | hei_bringup | robot_state_publisher、controller_manager、spawner 和本地节点统一启动 | 默认 motion inactive；关键节点退出时结束 launch |
 
 没有创建仅能编译但不能使用的硬件插件。当前只有 `mock_components/GenericSystem`；之后以 `hei_hardware` 对接物理设备。其作用是验证 ROS 2 接口管线，不提供接触物理、传感器真实性或实际停止保证。[官方 mock 说明](https://control.ros.org/jazzy/doc/ros2_control/hardware_interface/doc/mock_components_userdoc.html)
