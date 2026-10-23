@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>hei_hardware</name><version>0.1.0</version>
+  <description>Damiao hardware system and gripper controller plugins for HEI robots</description>
+  <maintainer email="maintainers@example.invalid">easeBot maintainers</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <build_depend>cargo</build_depend>
+  <depend>hardware_interface</depend>
+  <depend>controller_interface</depend>
+  <depend>rclcpp_action</depend>
+  <depend>control_msgs</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

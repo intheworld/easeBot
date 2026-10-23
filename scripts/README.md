@@ -1,17 +1,21 @@
 # 开发与部署脚本
 
-从仓库根目录执行命令。日常开发使用 `remote-dev.py`；准备脚本只在首次安装依赖或修复环境时运行。
+构建前统一执行 `bash scripts/setup.bash`；日常同步和远程编译使用 `remote-dev.py`。以下命令在仓库根目录运行，入口脚本本身不依赖当前目录。
 
 ```text
 scripts/
-  remote-dev.py                    SSH / rsync：check、init、sync、watch、build
+  setup.bash                      统一依赖准备入口
+  remote-dev.py                    SSH / rsync：check、init、sync、watch、setup、build
   env/                            用 source 加载，不安装依赖或启动节点
     workspace.bash                统一加载 Rust、隔离构建插件及以下两个环境
     ros-rust.bash                 本地 ROS typesupport 与 Rust 消息索引
     agent-bridge.bash             Agnes SDK 源码与 Python 运行依赖
-  setup/                          一次性工作区依赖准备
+  setup/                          内部依赖准备步骤，由 setup.bash 调用
+    prepare-build-tools.py         复用或隔离安装 Rust colcon 插件
+    build-requirements.txt          已验证的构建插件版本
     prepare-rust-ros.py            Rust 消息索引、缺少时解包 test_msgs
     prepare-agent-bridge.sh        锁定版本的 Agnes SDK 与运行依赖
+    prepare-motorbridge.bash       下载锁定的 motorbridge 与 Cargo 依赖
   jazzy/                          Ubuntu 22.04 上源码安装 Jazzy 的专用工具
     fetch-source.py               下载官方 ROS 源码归档
     prepare-vendors.py            缓存 vendor 归档，记录 CMake 下载补丁
@@ -21,7 +25,8 @@ scripts/
   remote/                         remote-dev.py 发送给 SSH 的 Bash 实现
     guard.bash                    检查目标标记、目录与 Git 保护
     init.bash                     初始化专用开发目录
-    build.bash                    加载目标 ROS 环境并运行 colcon
+    environment.bash              加载目标 ROS 与工作区依赖环境
+    build.bash                    运行 colcon
 ```
 
 ## 日常开发
@@ -30,6 +35,7 @@ scripts/
 
 ```bash
 python3 scripts/remote-dev.py robot sync
+python3 scripts/remote-dev.py robot setup  # 首次或依赖更新后，在目标机器执行统一入口
 python3 scripts/remote-dev.py robot build
 python3 scripts/remote-dev.py robot build --packages hei_monitor
 python3 scripts/remote-dev.py robot watch
@@ -49,14 +55,22 @@ source ros2_ws/install/setup.bash  # 构建完成后
 
 ## 首次准备依赖
 
+每台参与编译的机器执行同一个入口：
+
 ```bash
-# 先 source ROS。只准备 .deps，不修改 ROS 安装或系统 Python。
-python3 scripts/setup/prepare-rust-ros.py
-./scripts/setup/prepare-agent-bridge.sh  # 使用 Agent Bridge 时
+source /opt/ros/jazzy/setup.bash  # 机器人替换为 ~/hei_jazzy_deps/install/setup.bash
+bash scripts/setup.bash
 source scripts/env/workspace.bash
+# 然后执行 README 中的 colcon build
 ```
 
-Rust 脚本使用现有消息 crate 创建兼容索引，优先采用 AMENT_PREFIX_PATH 中靠前的包；`test_msgs` 已存在时不下载，否则根据 apt 元数据校验 deb 后解包。Agent 脚本需要 Git 和 uv 或系统 Python pip，按锁文件为本机 Python/架构安装依赖。
+默认依次准备构建插件、ROS Rust 索引/缺少的 test_msgs、motorbridge 锁定依赖、Agent Bridge SDK。只运行核心功能时可使用 `bash scripts/setup.bash --without-agent-bridge`。可重复执行，任何步骤失败立即返回非零码，后续步骤不运行。准备脚本不会改变父终端环境，所以完成后仍要 source 环境脚本。
+
+前置环境是完整 Jazzy underlay（含控制器依赖及生成好的 Rust 消息绑定）、Rust 工具链、C++ 编译器、CMake、Git、Python 和基础 colcon；脚本先检查这些条件，再安装工作区依赖。缺少插件时，使用 uv 或当前 Python 的 pip 安装到 `.deps/build-python`；Agent 依赖也只进入 `.deps/`。已有匹配版本的构建插件直接复用，不替换系统 Python。准备过程需要网络，Cargo 缓存位于当前用户的 Cargo 目录。旧 Agent SDK 若是不含 Git 元数据的源码目录，会先在临时目录获取固定版本，成功后把旧目录保存在 `.deps/agnes-harness-before-setup.*` 再切换；获取失败保留原目录。
+
+统一入口不负责安装操作系统软件包、完整 ROS 或 Rust 工具链；Ubuntu 22.04 源码安装 Jazzy 仍使用下面的专用流程。正常构建不隐式安装依赖、不执行 sudo、不启动节点。`setup/prepare-*` 保留为内部步骤，只有排查单项依赖时才需要直接调用。
+
+远程也不用 SSH 后逐个运行准备脚本：先 `remote-dev.py robot sync`，再 `remote-dev.py robot setup`，最后 `remote-dev.py robot build`。setup 使用 targets 配置中的 ROS underlay，支持 `--without-agent-bridge`；不会隐式同步或编译。
 
 ## Jazzy 源码安装
 
@@ -82,3 +96,5 @@ python3 -m pytest -q ros2_ws/tests/test_remote_dev.py ros2_ws/tests/test_scripts
 这些用例使用临时目录、模拟 SSH 与真实 rsync，不连接机器人，不下载依赖。工程联合测试仍按各包 README 和部署文档运行。
 
 2026-10-22 整理后验证：本地脚本测试 10 项通过；机器人原生 Jazzy 上 8 个工程包编译成功，全量测试 19 passed、1 skipped（真实相机用例默认跳过），C++ ↔ Python DDS 验收通过。机器人旧脚本副本保存在 `.deps/scripts-before-layout-*`，回归日志为 `ros2_ws/log/script-cleanup-tests.log`。
+
+2026-10-23 统一入口验证：18 项脚本测试通过，覆盖失败即停、错误环境不安装、可选 SDK、旧 SDK 备份/下载失败保留及远端目录保护。本机与 ARM64 机器均完成默认 setup；机器人随后通过远程 build 编译 9 个包。

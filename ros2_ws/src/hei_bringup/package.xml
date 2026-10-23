@@ -12,6 +12,7 @@
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>hei_description</exec_depend>
+  <exec_depend>hei_hardware</exec_depend>
   <exec_depend>hei_control</exec_depend>
   <exec_depend>hei_robot_manager</exec_depend>
   <exec_depend>hei_sensors</exec_depend>

@@ -1,0 +1,14 @@
+[package]
+name = "hei_motorbridge_backend"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+motor_core = { git = "https://github.com/motorbridge/motorbridge.git", rev = "d5700bcd5b7f9355dd2012488d463c3bac982259" }
+motor_vendor_damiao = { git = "https://github.com/motorbridge/motorbridge.git", rev = "d5700bcd5b7f9355dd2012488d463c3bac982259" }
+
+[workspace]

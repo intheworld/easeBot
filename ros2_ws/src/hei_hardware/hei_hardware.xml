@@ -1,0 +1,5 @@
+<library path="hei_hardware">
+  <class name="hei_hardware/DamiaoSystem" type="hei_hardware::DamiaoSystem" base_class_type="hardware_interface::SystemInterface">
+    <description>Damiao motors using the HEI 30-byte USB-CAN serial protocol. Read-only by default.</description>
+  </class>
+</library>

@@ -31,7 +31,7 @@ ros2 node info /hei/monitor
 ros2 param get /hei/monitor port
 ```
 
-构建环境除 Jazzy 外，需要 Rust、colcon-cargo、colcon-ros-cargo、cargo-ament-build，以及生成好的 ROS Rust 消息绑定。本机绑定依赖 rosidl_runtime_rs 0.6，因此固定使用 rclrs 0.7；rclrs 0.8 的 ros-env 绑定生成方式不同，不应只升级 crate 版本。rclrs 0.7 还会链接 test_msgs 的 C typesupport。系统可安装 `ros-jazzy-test-msgs`；没有 sudo 时，仓库根目录执行 `./scripts/setup/prepare-rust-ros.py`（根据 apt 元数据校验下载的 deb），然后在构建和启动的终端 `source scripts/env/ros-rust.bash`，使用被 git 忽略的 `.deps/` 本地依赖。该脚本不安装完整 ROS 或生成消息绑定。
+构建环境除 Jazzy 外，需要 Rust、colcon-cargo、colcon-ros-cargo、cargo-ament-build，以及生成好的 ROS Rust 消息绑定。本机绑定依赖 rosidl_runtime_rs 0.6，因此固定使用 rclrs 0.7；rclrs 0.8 的 ros-env 绑定生成方式不同，不应只升级 crate 版本。rclrs 0.7 还会链接 test_msgs 的 C typesupport。系统可安装 `ros-jazzy-test-msgs`；没有 sudo 时，仓库根目录执行统一入口 `bash scripts/setup.bash`（根据 apt 元数据校验下载的 deb），然后在构建和启动的终端 `source scripts/env/ros-rust.bash`，使用被 git 忽略的 `.deps/` 本地依赖。该脚本不安装完整 ROS 或生成消息绑定。
 
 Cargo.lock 固定解析结果；colcon 自动生成的 `.cargo/config.toml` 只保存本机 ROS 消息 crate 路径，不提交。
 

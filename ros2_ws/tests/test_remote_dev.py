@@ -227,3 +227,25 @@ def test_home_relative_path_resolution(tmp_path, monkeypatch):
                         lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, stdout="banner\n/home/seeed\n"))
     with pytest.raises(ValueError, match="remote HOME"):
         remote_dev.resolve_home(cfg)
+
+
+def test_remote_setup_uses_configured_underlay_and_same_entry(workspace, tmp_path, monkeypatch):
+    source, destination, invoke = workspace
+    (source / 'scripts/env').mkdir(parents=True)
+    (source / 'scripts/env/workspace.bash').write_text('export HEI_SETUP_ENV=loaded\n')
+    (source / 'scripts/setup.bash').write_text('''set -e
+[[ "$ROS_DISTRO" == jazzy && "$HEI_SETUP_ENV" == loaded ]]
+printf '%s\\n' "$@" > setup-args.txt
+''')
+    overlay = tmp_path / 'overlay/setup.bash'
+    overlay.parent.mkdir()
+    overlay.write_text('export ROS_DISTRO=jazzy\n')
+    cfg = tmp_path / 'setup-targets.json'
+    cfg.write_text(json.dumps({'robot': {'host': 'local-test', 'path': str(destination),
+                                         'ros_setup': str(overlay)}}))
+    assert invoke('init') == 0
+    assert invoke('sync') == 0
+    assert remote_dev.main(['--config', str(cfg), 'robot', 'setup', '--without-agent-bridge']) == 0
+    assert (destination / 'setup-args.txt').read_text().strip() == '--without-agent-bridge'
+    (destination / '.git').mkdir()
+    assert remote_dev.main(['--config', str(cfg), 'robot', 'setup']) == 1

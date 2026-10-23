@@ -1,0 +1,154 @@
+"""Two independent PTYs and real controller managers, no physical devices."""
+import os
+import signal
+import subprocess
+import time
+import uuid
+
+import pytest
+import yaml
+rclpy = pytest.importorskip('rclpy')
+from action_msgs.msg import GoalStatus
+from control_msgs.action import GripperCommand
+from controller_manager_msgs.srv import ListControllers, ListHardwareInterfaces
+from rclpy.action import ActionClient
+from rclpy.context import Context
+from rclpy.executors import SingleThreadedExecutor
+from test_shared_gripper import SharedAdapter, gripper_goal
+from test_damiao_stack import ROOT
+
+
+@pytest.mark.parametrize('readonly', [False, True])
+def test_both_grippers_start_and_control_independent_buses(tmp_path, monkeypatch, readonly):
+    domain = 120 + os.getpid() % 30
+    monkeypatch.setenv('ROS_DOMAIN_ID', str(domain))
+    monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'LOCALHOST')
+    monkeypatch.delenv('ROS_LOCALHOST_ONLY', raising=False)
+    adapters, profiles = {}, {}
+    for side in ('left', 'right'):
+        config = yaml.safe_load((ROOT / f'hei_bringup/config/{side}_arm.yaml').read_text())
+        adapter = SharedAdapter(config['motors'] + [config['gripper']])
+        adapter.arm_mode = 1
+        adapters[side] = adapter
+        config.update(port=adapter.path, feedback_timeout_ms=500)
+        profiles[side] = tmp_path / f'{side}.yaml'
+        profiles[side].write_text(yaml.safe_dump(config))
+    suffix = uuid.uuid4().hex[:8]
+    namespace = f'dual_{suffix}'
+    log_path = tmp_path / 'dual.log'
+    context = Context()
+    rclpy.init(context=context, domain_id=domain)
+    node = rclpy.create_node('dual_gripper_test', context=context)
+    executor = SingleThreadedExecutor(context=context)
+    executor.add_node(node)
+    log = log_path.open('w')
+    process = subprocess.Popen(['ros2', 'launch', 'hei_bringup', 'grippers.launch.py',
+        f'read_only:={str(readonly).lower()}',
+        f'namespace:={namespace}',
+        *[f'{side}_config_file:={profile}' for side, profile in profiles.items()]],
+        stdout=log, stderr=log, env=os.environ.copy(), start_new_session=True)
+
+    def until(predicate, timeout=25):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            assert process.poll() is None, log_path.read_text()[-16000:]
+            assert all(a.error is None for a in adapters.values())
+            executor.spin_once(timeout_sec=.02)
+            if predicate():
+                return
+        raise AssertionError(log_path.read_text()[-16000:])
+
+    def wait(future):
+        until(future.done)
+        return future.result()
+
+    def call(client, request):
+        until(client.service_is_ready)
+        return wait(client.call_async(request))
+
+    clients = {}
+    try:
+        for side in adapters:
+            ns = namespace
+            listing = node.create_client(ListControllers, f'/{ns}/{side}_controller_manager/list_controllers')
+            interfaces = node.create_client(ListHardwareInterfaces, f'/{ns}/{side}_controller_manager/list_hardware_interfaces')
+            client = ActionClient(node, GripperCommand, f'/{ns}/{side}_gripper_controller/gripper_cmd')
+            clients[side] = client
+            expected = {f'{side}_joint_state_broadcaster': 'active',
+                        f'{side}_gripper_controller': 'inactive' if readonly else 'active'}
+            until(lambda: {c.name: c.state for c in call(listing, ListControllers.Request()).controller} == expected)
+            until(client.server_is_ready)
+            info = call(interfaces, ListHardwareInterfaces.Request())
+            assert len(info.state_interfaces) == 23
+            assert len(info.command_interfaces) == (0 if readonly else 4)
+            assert all(i.name.startswith(f'{side}_gripper_motor/') for i in info.command_interfaces)
+            assert not any(adapters[side].enabled.values())
+        until(lambda: all(f'/{namespace}/{side}_{topic}' in dict(node.get_topic_names_and_types())
+                          for side in adapters for topic in ('tf_static', 'joint_states', 'robot_description')))
+        graph = node.get_node_names_and_namespaces()
+        for side in adapters:
+            for name in (f'{side}_controller_manager', f'{side}_joint_state_broadcaster',
+                         f'{side}_gripper_controller', f'{side}_robot_state_publisher'):
+                assert graph.count((name, f'/{namespace}')) == 1
+        if readonly:
+            for client in clients.values():
+                assert not wait(client.send_goal_async(gripper_goal(.003, 0.0))).accepted
+            assert all(can_id == 0x7ff and data[2] == 0xcc
+                       for adapter in adapters.values() for can_id, data in adapter.frames)
+        else:
+            # Starting one side must not enable or change the other bus.
+            left = wait(clients['left'].send_goal_async(gripper_goal(.003, 0.0)))
+            assert left.accepted
+            assert wait(left.get_result_async()).status == GoalStatus.STATUS_SUCCEEDED
+            assert adapters['left'].enabled[7] and not any(adapters['right'].enabled.values())
+            # Keep both goals in flight to verify simultaneous control.
+            left_future = clients['left'].send_goal_async(gripper_goal(.004, 0.0))
+            right_future = clients['right'].send_goal_async(gripper_goal(.005, 0.0))
+            handles = [wait(left_future), wait(right_future)]
+            assert all(h.accepted for h in handles)
+            assert all(wait(h.get_result_async()).status == GoalStatus.STATUS_SUCCEEDED for h in handles)
+            assert all(a.enabled[7] and not any(a.enabled[i] for i in range(1, 7)) for a in adapters.values())
+            assert abs(adapters['left'].positions[7] - (-.18)) < .001
+            assert abs(adapters['right'].positions[7] - (-.225)) < .001
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGINT)
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=3)
+        log.close()
+        for client in clients.values():
+            client.destroy()
+        executor.remove_node(node)
+        executor.shutdown()
+        node.destroy_node()
+        context.shutdown()
+        for adapter in adapters.values():
+            adapter.close()
+    assert not any(a.enabled[i] for a in adapters.values() for i in a.enabled)
+    assert all(a.error is None for a in adapters.values())
+
+
+@pytest.mark.parametrize('collision', ['namespace', 'serial'])
+def test_dual_launch_rejects_conflicts_before_starting_nodes(tmp_path, collision):
+    import runpy
+    from launch import LaunchContext
+    setup = runpy.run_path(str(ROOT / 'hei_bringup/launch/grippers.launch.py'))['setup']
+    context = LaunchContext()
+    values = dict(namespace='test_dual',
+                  read_only='false', position_only='true', activate_gripper='true',
+                  gripper_config_file='')
+    for side in ('left', 'right'):
+        port = tmp_path / f'{side}_port'
+        if collision == 'serial':
+            port.symlink_to(tmp_path / 'same_device')
+        profile = tmp_path / f'{side}.yaml'
+        profile.write_text(yaml.safe_dump({'port': str(port)}))
+        values[f'{side}_config_file'] = str(profile)
+    if collision == 'namespace':
+        values['namespace'] = 'invalid/namespace'
+    context.launch_configurations.update(values)
+    with pytest.raises(ValueError, match='namespace must be|different serial devices'):
+        setup(context)

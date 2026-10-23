@@ -1,0 +1,46 @@
+# This overrides only the gripper controller in real seven-motor bringup.
+/**/right_gripper_controller:
+  ros__parameters:
+    motor_resource: right_gripper_motor
+    position_min_rad: -4.5
+    position_max_rad: 0.0
+    default_velocity_rad_s: 10.0
+    max_velocity_rad_s: 10.0
+    default_current_ratio: 0.05
+    max_current_ratio: 0.05
+    position_tolerance_rad: 0.005
+    # 0 estimates duration from travel/speed; positive seconds override it.
+    goal_timeout_sec: 0.0
+    max_timeout_sec: 120.0
+    stall_timeout_sec: 1.0
+    # Full-force control still requires the coefficients below.
+    calibrated: true
+    # Position reference: hei-rebot-lift b7c45e1, single finger 0..0.05m
+    # for motor 0..-4.5rad; standard gap uses BOTH fingers (0..0.10m).
+    # Model-based reference, not a measured force calibration.
+    # Supply measured force coefficients before setting calibrated=true.
+    gap_at_zero_m: 0.0
+    gap_per_motor_rad_m: -0.022222222222222223
+    force_per_motor_torque_n_nm: 0.0
+    motor_torque_per_current_ratio_nm: 0.0
+/**/left_gripper_controller:
+  ros__parameters:
+    motor_resource: left_gripper_motor
+    position_min_rad: -4.5
+    position_max_rad: 0.0
+    default_velocity_rad_s: 10.0
+    max_velocity_rad_s: 10.0
+    default_current_ratio: 0.05
+    max_current_ratio: 0.05
+    position_tolerance_rad: 0.005
+    # 0 estimates duration from travel/speed; positive seconds override it.
+    goal_timeout_sec: 0.0
+    max_timeout_sec: 120.0
+    stall_timeout_sec: 1.0
+    # Full-force control still requires the coefficients below.
+    calibrated: true
+    # Same nominal two-finger position reference as the right side; force unknown.
+    gap_at_zero_m: 0.0
+    gap_per_motor_rad_m: -0.022222222222222223
+    force_per_motor_torque_n_nm: 0.0
+    motor_torque_per_current_ratio_nm: 0.0

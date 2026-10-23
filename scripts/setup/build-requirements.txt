@@ -1,0 +1,4 @@
+# Known working ROS Rust build plugins. Transitive dependencies are resolved by pip/uv.
+colcon-cargo==0.2.0
+colcon-ros-cargo==0.2.0
+cargo-ament-build==0.1.11

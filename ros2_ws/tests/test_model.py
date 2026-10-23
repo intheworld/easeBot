@@ -40,3 +40,20 @@ def test_controller_configuration_covers_every_command_interface():
         assigned += params.get('joints', params.get('wheel_names', []))
     assert set(assigned) == expected
     assert len(assigned) == len(set(assigned))
+
+
+@pytest.mark.parametrize('arm,prefix', [('right', 'a_right'), ('left', 'b_left')])
+def test_damiao_arm_description_has_no_mock_or_commands_by_default(arm, prefix):
+    xacro = pytest.importorskip('xacro')
+    path = str(ROOT / 'hei_description/urdf/hei_damiao_arm.urdf.xacro')
+    profile = str(ROOT / f'hei_bringup/config/{arm}_arm.yaml')
+    robot = E.fromstring(xacro.process_file(path, mappings={'config_file': profile}).toxml())
+    hardware = robot.find('ros2_control')
+    assert hardware.findtext('hardware/plugin') == 'hei_hardware/DamiaoSystem'
+    assert hardware.findtext("hardware/param[@name='read_only']") == 'true'
+    assert [joint.get('name') for joint in hardware.findall('joint')] == [f'{prefix}_joint{i}' for i in range(1, 7)]
+    assert hardware.findall('joint/command_interface') == []
+    assert not robot.findall('.//param[@name="initial_value"]')
+    writable = E.fromstring(xacro.process_file(path, mappings={
+        'config_file': profile, 'read_only': 'false'}).toxml())
+    assert len(writable.findall('ros2_control/joint/command_interface')) == 6

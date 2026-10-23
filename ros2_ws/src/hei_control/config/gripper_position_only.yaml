@@ -1,0 +1,8 @@
+# Debug/read-only preset: nominal opening control at the configured current cap.
+# Without force calibration only max_effort=0 is accepted, effort feedback is NaN.
+/**/right_gripper_controller:
+  ros__parameters:
+    position_only: true
+/**/left_gripper_controller:
+  ros__parameters:
+    position_only: true

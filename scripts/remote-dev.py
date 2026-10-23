@@ -18,7 +18,9 @@ MARKER = ".hei-sync-root"
 REMOTE_SCRIPTS = Path(__file__).resolve().parent / "remote"
 GUARD = (REMOTE_SCRIPTS / "guard.bash").read_text()
 INIT = (REMOTE_SCRIPTS / "init.bash").read_text()
-BUILD = GUARD + (REMOTE_SCRIPTS / "build.bash").read_text()
+ENVIRONMENT = (REMOTE_SCRIPTS / "environment.bash").read_text()
+BUILD = GUARD + ENVIRONMENT + (REMOTE_SCRIPTS / "build.bash").read_text()
+SETUP = GUARD + ENVIRONMENT + 'bash scripts/setup.bash "$@"\n'
 
 
 def target_config(path, name):
@@ -172,6 +174,8 @@ def main(argv=None):
     watch.add_argument("--delete", action="store_true", help="also propagate source deletions")
     watch.add_argument("--interval", type=float, default=0.5, help="local scan interval in seconds (default .5)")
     watch.add_argument("--debounce", type=float, default=1.0, help="quiet time before syncing (default 1)")
+    setup = commands.add_parser("setup", help="prepare dependencies in the previously synced tree")
+    setup.add_argument("--without-agent-bridge", action="store_true")
     build = commands.add_parser("build", help="build the previously synced tree on the remote machine")
     build.add_argument("--packages", nargs="+", default=[], help="packages and recursive dependencies; default all")
     args = parser.parse_args(argv)
@@ -190,6 +194,9 @@ def main(argv=None):
             sync_source(cfg, dry_run=args.dry_run, delete=args.delete)
         elif args.command == "watch":
             watch_source(cfg, delete=args.delete, interval=args.interval, debounce=args.debounce)
+        elif args.command == "setup":
+            options = ["--without-agent-bridge"] if args.without_agent_bridge else []
+            ssh(cfg, SETUP, cfg["ros_distro"], cfg["ros_setup"], *options)
         elif args.command == "build":
             if any(not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", p) for p in args.packages):
                 raise ValueError("invalid ROS package name")

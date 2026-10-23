@@ -10,6 +10,7 @@ Web 继续只做状态监控。控制通过独立 ROS 2 service、topic 和 acti
 ros2_ws/src/
   hei_description/      HEI URDF、30 个原始网格、TF 与 RViz 配置
   hei_control/          ros2_control 双臂、夹爪、升降与全向底盘控制器配置
+  hei_hardware/         达妙硬件系统与夹爪控制器插件，默认只读的单侧入口
   hei_robot_manager/    控制器启停、反馈检查与 diagnostics
   hei_sensors/          三相机生命周期节点、图像与持续诊断
   hei_monitor/          Rust ROS 节点、状态缓存与 Axum 只读 Web
@@ -25,13 +26,12 @@ ros2_ws/src/
 
 脚本的用途、目录和执行位置见[脚本说明](scripts/README.md)。日常环境统一使用 `source scripts/env/workspace.bash` 加载。
 
-本机已具备 Jazzy。Rust monitor 还需要 Rust 工具链、`colcon-cargo`、`colcon-ros-cargo`、`cargo-ament-build` 和 ROS Rust 消息绑定；详见 [监控包说明](ros2_ws/src/hei_monitor/README.md)。准备依赖后执行：
+本机已具备 Jazzy。需要已有 Rust/C++ 工具链及 ROS Rust 消息绑定；统一入口会准备 Rust 构建插件和各模块依赖。详见 [脚本说明](scripts/README.md)。
 
 ```bash
 cd /home/cw/gitdir/easeBot
 source /opt/ros/jazzy/setup.bash
-# 系统未安装 ros-jazzy-test-msgs 时，可无 sudo 解包到工作区 .deps/
-./scripts/setup/prepare-rust-ros.py
+bash scripts/setup.bash  # 首次构建或依赖变更后；默认包含 Agent Bridge
 source scripts/env/workspace.bash
 # 新机器可使用 rosdep 检查并安装 package.xml 中的依赖
 # rosdep install --from-paths ros2_ws/src --ignore-src -r -y
@@ -71,9 +71,28 @@ ros2 lifecycle set /hei/cameras activate
 
 RViz 配置默认使用 `/hei/robot_description`；自定义 namespace 时需在 RViz 中选择相应 description topic。没有定位系统，默认不发布 `map → odom` 或 `odom → base_footprint`。
 
+## 机械臂与夹爪共享总线
+
+同侧七个电机由一个 `hei_hardware/DamiaoSystem` 管理串口，机械臂和夹爪使用独立控制器，可同时工作。默认只读启动：
+
+```bash
+ros2 launch hei_bringup damiao_arm.launch.py arm:=right
+```
+
+可控制入口使用 `read_only:=false`，两个控制器初始均为 inactive；六轴需事先核对 POS_VEL 模式、零位和限位，夹爪使用 Torque_Pos。整臂与夹爪分别激活、停止，不再需要两个节点争用串口。
+
+| 接口 | 类型 |
+| --- | --- |
+| `/hei/right_arm_controller/follow_joint_trajectory` | control_msgs/action/FollowJointTrajectory |
+| `/hei/right_gripper_controller/gripper_cmd` | control_msgs/action/GripperCommand |
+
+双侧夹爪同时调试运行 `ros2 launch hei_bringup grippers.launch.py`，左右 Action 分别在 `/hei/left_gripper_controller/gripper_cmd` 和 `/hei/right_gripper_controller/gripper_cmd`。统一 namespace 为 `/hei`，管理器分别命名为 `left_controller_manager` 和 `right_controller_manager`；自动激活两侧夹爪控制器，六轴保持只读。单侧调试使用 `damiao_arm.launch.py`，详见夹爪说明。默认位置调试只接受 `max_effort: 0`（沿用电流比例 0.05），未标定力时反馈为 NaN；正数牛顿目标仍需力标定。标准夹爪接口使用 m/N；内部电机限位仍为 [-4.5,0] rad。到位后保持，取消/超时只失能夹爪；同侧硬件故障会停止两个控制器。只读入口也加载 inactive 的夹爪 Action Server。真实夹爪反馈力矩阈值在硬件 YAML 中显式配置为 3 N·m，取 DM-J4310-2EC V1.1 的额定值；协议量程仍为 10 N·m。完整命令、标定与测试见 [夹爪控制器](ros2_ws/src/hei_hardware/GRIPPER.md)。
+
+Rust motorbridge 的串口协议适配说明见 [hei_hardware](ros2_ws/src/hei_hardware/README.md)。原 `robot.launch.py` 仍保持整机 mock。夹爪统一使用共享控制器的标准 `gripper_cmd` Action。
+
 ## Agnes Agent 接入
 
-已增加可选的 `hei_agent_bridge`。第一版仅提供机器人状态查询和三路 JPEG 观测，不接受运动命令；不会改变 Web 只读约定。先运行 `./scripts/setup/prepare-agent-bridge.sh` 安装工作区本地 SDK 依赖，再在启动终端 `source scripts/env/agent-bridge.bash`。
+已增加可选的 `hei_agent_bridge`。第一版仅提供机器人状态查询和三路 JPEG 观测，不接受运动命令；不会改变 Web 只读约定。统一入口 `bash scripts/setup.bash` 默认准备 SDK 依赖，启动终端使用 `source scripts/env/workspace.bash`。
 
 ```bash
 # 默认连接本机已启用的 AgnesHub；Hub 地址与 Web UI 地址不同
@@ -102,7 +121,7 @@ ros2 run hei_robot_manager joint_demo
 ros2 service call /hei/robot_manager/stop std_srvs/srv/Trigger '{}'
 ```
 
-双臂、两只夹爪和升降均提供 `/<namespace>/<group>_controller/follow_joint_trajectory`。双臂每侧六关节；夹爪以主指的线位移 m 表示，另一指 mimic；升降 m，上限位参考 0、向下为负。它们与旧版夹爪电机 rad、升降 mm 的 LeRobot 接口不同，需要显式转换，不能直接对接旧动作数组。
+默认整机 mock 中，双臂、两只夹爪和升降均提供 `/<namespace>/<group>_controller/follow_joint_trajectory`。双臂每侧六关节；夹爪以主指的线位移 m 表示，另一指 mimic；升降 m，上限位参考 0、向下为负。它们与旧版夹爪电机 rad、升降 mm 的 LeRobot 接口不同，需要显式转换，不能直接对接旧动作数组。
 
 底盘使用 `omni_wheel_drive_controller`，订阅 `/hei/base_controller/cmd_vel` (`geometry_msgs/msg/TwistStamped`)，发布 `/hei/base_controller/odom`。其半径、轮径和符号是 **mock 联调参数，未经实机标定**；没有真实速度能力承诺。指令超时 0.3 秒后标准控制器归零。
 
@@ -141,7 +160,7 @@ python3 -m pytest -q ros2_ws/tests
 
 模型来源和 mock 限值修改见 [模型来源记录](/home/cw/gitdir/easeBot/ros2_ws/src/hei_description/SOURCE.md)，上游许可随包保留。原始几何与运动学来自 HEI 仓库；零速度/力限位被替换为用于 mock 的临时值，不能作为实机额定值。
 
-下一阶段实现 `hei_hardware` 的达妙 U2CAN `hardware_interface::SystemInterface`，届时再引入必要的 C++。管理节点分别使用关节反馈超时（默认 1 秒）和控制器查询超时（默认 5 秒），可用 ROS 参数调整。控制器查询耗时不会被误当作电机关节反馈中断。
+达妙 U2CAN 已通过 `hei_hardware` 接入 motorbridge，下一阶段验证真实反馈、校准与单关节控制。管理节点分别使用关节反馈超时（默认 1 秒）和控制器查询超时（默认 5 秒），可用 ROS 参数调整。控制器查询耗时不会被误当作电机关节反馈中断。
 
 本次不创建不可用的硬件占位插件；没有连接真机的 launch 参数。MoveIt、导航和 VR/LeRobot 接入仍为后续模块。
 

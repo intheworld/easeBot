@@ -1,0 +1,5 @@
+<library path="hei_hardware_gripper">
+  <class name="hei_hardware/GripperController" type="hei_hardware::GripperController" base_class_type="controller_interface::ControllerInterface">
+    <description>Motor7 Torque_Pos controller; serial I/O belongs to DamiaoSystem.</description>
+  </class>
+</library>

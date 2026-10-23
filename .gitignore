@@ -13,8 +13,11 @@ ros2_ws/install-*/
 ros2_ws/log-*/
 log/
 
-# colcon-generated Rust message paths and Cargo build output
+# Machine-specific, generated ROS Rust message paths
 .cargo/config.toml
+ros2_ws/.cargo/config.toml
+
+# Cargo build output
 target/
 
 .deps/

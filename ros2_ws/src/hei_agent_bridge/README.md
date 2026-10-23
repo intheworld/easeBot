@@ -8,10 +8,9 @@ Agnes SDK 当前从源码安装，不假定存在同名 PyPI 发布。仓库提�
 
 ```bash
 cd /home/cw/gitdir/easeBot
-# 需要 git、uv 或 python3-pip、已安装的 ROS 2 Jazzy
-./scripts/setup/prepare-agent-bridge.sh
 source /opt/ros/jazzy/setup.bash
-source scripts/env/agent-bridge.bash
+bash scripts/setup.bash  # 统一准备，默认包含 Agent SDK
+source scripts/env/workspace.bash
 colcon --log-base ros2_ws/log build --base-paths ros2_ws/src \
   --build-base ros2_ws/build --install-base ros2_ws/install \
   --packages-select hei_agent_bridge hei_bringup

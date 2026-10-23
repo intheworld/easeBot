@@ -1,0 +1,106 @@
+# Reference wiring/protocol values from hei-rebot-lift; confirm calibration and firmware ranges before motion.
+port: /dev/hei_right_arm
+baud: 921600
+feedback_timeout_ms: 250
+configure_timeout_ms: 2000
+motors:
+- name: a_right_joint1
+  motor_id: 1
+  feedback_id: 17
+  model: DM4340
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 10.0
+  t_max: 28.0
+  velocity_limit: 0.1
+  minimum: -0.3
+  maximum: 1.5
+- name: a_right_joint2
+  motor_id: 2
+  feedback_id: 18
+  model: DM4340
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 10.0
+  t_max: 28.0
+  velocity_limit: 0.1
+  minimum: -3.14
+  maximum: 0
+- name: a_right_joint3
+  motor_id: 3
+  feedback_id: 19
+  model: DM4340
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 10.0
+  t_max: 28.0
+  velocity_limit: 0.1
+  minimum: -3.14
+  maximum: 0
+- name: a_right_joint4
+  motor_id: 4
+  feedback_id: 20
+  model: DM4310
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 30.0
+  t_max: 10.0
+  velocity_limit: 0.1
+  minimum: -1.4
+  maximum: 1.57
+- name: a_right_joint5
+  motor_id: 5
+  feedback_id: 21
+  model: DM4310
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 30.0
+  t_max: 10.0
+  velocity_limit: 0.1
+  minimum: -1.57
+  maximum: 1.57
+- name: a_right_joint6
+  motor_id: 6
+  feedback_id: 22
+  model: DM4310
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 30.0
+  t_max: 10.0
+  velocity_limit: 0.1
+  minimum: -3.14
+  maximum: 3.14
+
+# Same USB-CAN bus, independently claimed by the gripper controller.
+# Raw motor resource, not an uncalibrated prismatic finger joint.
+gripper:
+  name: right_gripper_motor
+  motor_id: 7
+  feedback_id: 23
+  model: DM4310
+  control_mode: torque_pos
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 30.0
+  t_max: 10.0
+  velocity_limit: 10.0
+  current_ratio_limit: 0.05
+  # DM-J4310-2EC V1.1: rated output 3 Nm, peak 7 Nm.
+  # Project feedback trip threshold uses the rated value; t_max is protocol range.
+  torque_limit_nm: 3.0
+  minimum: -4.5
+  maximum: 0.0
