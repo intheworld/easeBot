@@ -1,4 +1,5 @@
 mod cache;
+mod hardware;
 mod http;
 mod ros;
 use rclrs::RclrsErrorFilter;
@@ -16,6 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let status_tasks = ros::start_status_polling(&_subscriptions, cache.clone())?;
     let commands = executor.commands().clone();
     let (done_tx, mut done_rx) = tokio::sync::oneshot::channel();
     let ros_thread = std::thread::spawn(move || {
@@ -32,6 +34,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         })
         .await;
+    for task in status_tasks {
+        task.abort();
+        let _ = task.await;
+    }
     commands.halt_spinning();
     let ros_result = ros_thread
         .join()

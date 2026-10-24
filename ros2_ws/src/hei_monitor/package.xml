@@ -12,5 +12,6 @@
   <depend>rcl_interfaces</depend><depend>rosgraph_msgs</depend><depend>unique_identifier_msgs</depend>
   <depend>test_msgs</depend>
   <depend>sensor_msgs</depend><depend>nav_msgs</depend><depend>diagnostic_msgs</depend>
+  <depend>control_msgs</depend><depend>controller_manager_msgs</depend>
   <export><build_type>ament_cargo</build_type></export>
 </package>

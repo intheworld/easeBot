@@ -1,13 +1,1 @@
-# Camera-only profile for the current HEI robot's USB 2.0 topology.
-# Use with ros2 run hei_sensors cameras --ros-args --params-file <this file>.
-/**/cameras:
-  ros__parameters:
-    backend: opencv
-    fps: 10.0
-    capture_api: v4l2
-    front_device: /dev/hei_front_camera
-    left_wrist_device: /dev/hei_left_wrist_camera
-    right_wrist_device: /dev/hei_right_wrist_camera
-    front_fourcc: ''
-    left_wrist_fourcc: MJPG
-    right_wrist_fourcc: MJPG
+../../ros2_ws/src/hei_bringup/config/cameras.yaml

@@ -1,6 +1,6 @@
 # easeBot · HEI ReBot Lift ROS 2
 
-机器人本地 ROS 2 软件栈，参考 ROBOTIS AI Worker 的包边界组织。当前实现基于本机 ROS 2 Jazzy，默认使用 `ros2_control` 官方 mock hardware；不打开达妙电机串口，不执行真实回零。
+机器人本地 ROS 2 软件栈，参考 ROBOTIS AI Worker 的包边界组织。当前实现基于 ROS 2 Jazzy。正式入口 `robot.launch.py` 默认连接真机，启动全部执行器并完成升降回零；本地模拟使用 `mock_robot.launch.py`。
 
 Web 继续只做状态监控。控制通过独立 ROS 2 service、topic 和 action 完成。
 
@@ -10,7 +10,7 @@ Web 继续只做状态监控。控制通过独立 ROS 2 service、topic 和 acti
 ros2_ws/src/
   hei_description/      HEI URDF、30 个原始网格、TF 与 RViz 配置
   hei_control/          ros2_control 双臂、夹爪、升降与全向底盘控制器配置
-  hei_hardware/         达妙硬件系统与夹爪控制器插件，默认只读的单侧入口
+  hei_hardware/         达妙硬件系统、夹爪与升降控制器插件
   hei_robot_manager/    控制器启停、反馈检查与 diagnostics
   hei_sensors/          三相机生命周期节点、图像与持续诊断
   hei_monitor/          Rust ROS 节点、状态缓存与 Axum 只读 Web
@@ -39,10 +39,10 @@ colcon --log-base ros2_ws/log build --base-paths ros2_ws/src \
   --build-base ros2_ws/build --install-base ros2_ws/install
 source ros2_ws/install/setup.bash
 
-# 本机开发时限制发现范围，domain 需与控制终端保持一致
+# 本机模拟开发时限制发现范围，domain 需与控制终端保持一致
 export ROS_DOMAIN_ID=71
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-ros2 launch hei_bringup robot.launch.py
+ros2 launch hei_bringup mock_robot.launch.py
 ```
 
 只读页面：[http://127.0.0.1:8081](http://127.0.0.1:8081)。默认没有 HTTP 身份认证或 TLS，绑定回环地址；跨机器访问可用 SSH 转发。`Ctrl+C` 关闭本次 launch 的节点。
@@ -50,10 +50,10 @@ ros2 launch hei_bringup robot.launch.py
 可选参数：
 
 ```bash
-ros2 launch hei_bringup robot.launch.py rviz:=true
-ros2 launch hei_bringup robot.launch.py monitor:=false
-ros2 launch hei_bringup robot.launch.py namespace:=hei monitor_port:=8081
-ros2 launch hei_bringup robot.launch.py camera_backend:=opencv
+ros2 launch hei_bringup mock_robot.launch.py rviz:=true
+ros2 launch hei_bringup mock_robot.launch.py monitor:=false
+ros2 launch hei_bringup mock_robot.launch.py namespace:=hei monitor_port:=8081
+ros2 launch hei_bringup mock_robot.launch.py camera_backend:=opencv
 ```
 
 `opencv` 只切换相机，电机仍为 mock。当前默认设备为 `/dev/hei_front_camera`、`/dev/hei_left_wrist_camera`、`/dev/hei_right_wrist_camera`，可用相机节点参数配置。相机不能同时被旧 HEI host 打开。相机内外参未验证，因此当前不发布虚构的已标定 CameraInfo。
@@ -71,9 +71,50 @@ ros2 lifecycle set /hei/cameras activate
 
 RViz 配置默认使用 `/hei/robot_description`；自定义 namespace 时需在 RViz 中选择相应 description topic。没有定位系统，默认不发布 `map → odom` 或 `odom → base_footprint`。
 
+## 真机统一启动
+
+加载 Jazzy 和工程安装环境后，一条命令启动双臂、双夹爪、底盘和升降：
+
+```bash
+ros2 launch hei_bringup robot.launch.py
+```
+
+默认可写、自动配置并回读 RAM 控制模式、激活全部运动控制器。机械臂以实测位置初始化保持；底盘初始零速度；夹爪沿用电流比例 0.05，收到合法目标才使能；升降自动向上回零，完成后激活高度控制器。因此启动会使能机械臂和底盘，并可能移动升降。模式配置不保存 EEPROM、不修改电机零位。
+
+统一命名空间为 `/hei`，四个管理器为 `left_controller_manager`、`right_controller_manager`、`base_controller_manager`、`lift_controller_manager`。所有控制器就绪后输出 `Robot actuators ready`；任一关键进程退出、控制器启动失败或整体等待超过 90 秒，本次 launch 统一退出。此检查只负责启动，不自动恢复运行中的硬件故障。monitor 独立运行，仅做只读状态查询，退出不会停掉执行器。各总线的状态和 TF 保留原有前缀。
+
+```bash
+# 整机只读：不使能、不配置模式、不回零
+ros2 launch hei_bringup robot.launch.py read_only:=true
+# 硬件 YAML 路径可分别覆盖，其余使用 hei_bringup/config 下的配置
+ros2 launch hei_bringup robot.launch.py left_config_file:=/absolute/path/left_arm.yaml
+```
+
+启动前检查四条电机总线和升降 IO 是否复用了同一设备（含符号链接）。不要同时运行占用相同总线的单独调试入口。真机入口整合执行器；Web monitor 默认随真机启动（0.0.0.0:8081，局域网访问 `http://seeed.local:8081/`），直接读取四条总线与管理器状态；三相机也默认以 OpenCV/V4L2 配置激活（可用 `cameras:=false` 禁用）；Agent Bridge 的原模拟参数保留在 `mock_robot.launch.py`，未将仅支持 mock 的 robot_manager 用于真机。
+
+## 升降
+
+独立升降入口默认可写，自动配置 VEL 模式、回零并激活高度控制器：
+
+```bash
+ros2 launch hei_bringup damiao_lift.launch.py
+```
+
+默认回上限位建立软件高度零点，成功后自动激活 `/hei/lift_controller/follow_joint_trajectory`。高度单位米，上端 0、向下为负；管理器 `/hei/lift_controller_manager`，可与双臂及底盘入口并行。配置、限位策略及 Action 命令见 [升降说明](ros2_ws/src/hei_hardware/LIFT.md)。
+
+## 达妙底盘
+
+底盘四轮复用 `DamiaoSystem` 的 VEL 接口与标准全向轮控制器，默认可写并自动激活：
+
+```bash
+ros2 launch hei_bringup damiao_base.launch.py
+```
+
+`read_only:=false` 时默认自动激活四轮；命令话题 `/hei/base_controller/cmd_vel` 使用带当前时间戳的 `TwistStamped`。管理器为 `/hei/base_controller_manager`，可与双臂入口并行运行。接线映射、启动及低速命令见 [底盘说明](ros2_ws/src/hei_hardware/BASE.md)。
+
 ## 机械臂与夹爪共享总线
 
-同侧七个电机由一个 `hei_hardware/DamiaoSystem` 管理串口，机械臂和夹爪使用独立控制器，可同时工作。默认只读启动：
+同侧七个电机由一个 `hei_hardware/DamiaoSystem` 管理串口，机械臂和夹爪使用独立控制器，可同时工作。默认可写并激活机械臂和夹爪控制器：
 
 ```bash
 ros2 launch hei_bringup damiao_arm.launch.py arm:=right
@@ -87,7 +128,7 @@ ros2 launch hei_bringup damiao_arms.launch.py configure_control_mode:=true
 
 默认 `activate_arm:=true`：双臂六轴自动使能并以实测位置初始化保持目标；`activate_arm:=false` 只配置机械臂控制器，`read_only:=true` 完全只读且不加载机械臂控制器。两侧管理器为 `/hei/left_controller_manager`、`/hei/right_controller_manager`；轨迹 Action 为 `/hei/left_arm_controller/follow_joint_trajectory`、`/hei/right_arm_controller/follow_joint_trajectory`。夹爪控制器自动激活，收到有效目标才使能 motor7，默认位置调试 `max_effort: 0`。可传 `include_gripper:=false` 仅启动双臂。
 
-`configure_control_mode` 默认 false；显式 true 在失能状态设置并回读 RAM POS_VEL，不保存 EEPROM。单侧入口 `damiao_arm.launch.py arm:=right read_only:=false` 同样默认自动激活机械臂，夹爪默认 inactive。
+`configure_control_mode` 默认 true，在失能状态设置并回读 RAM POS_VEL，不保存 EEPROM。单侧入口同样默认可写、自动激活机械臂与夹爪，使用未标定力的位置模式。所有真机入口可显式使用 `read_only:=true` 检查反馈。
 
 | 接口 | 类型 |
 | --- | --- |
@@ -96,7 +137,7 @@ ros2 launch hei_bringup damiao_arms.launch.py configure_control_mode:=true
 
 双侧夹爪同时调试运行 `ros2 launch hei_bringup grippers.launch.py`，左右 Action 分别在 `/hei/left_gripper_controller/gripper_cmd` 和 `/hei/right_gripper_controller/gripper_cmd`。统一 namespace 为 `/hei`，管理器分别命名为 `left_controller_manager` 和 `right_controller_manager`；自动激活两侧夹爪控制器，六轴保持只读。单侧调试使用 `damiao_arm.launch.py`，详见夹爪说明。默认位置调试只接受 `max_effort: 0`（沿用电流比例 0.05），未标定力时反馈为 NaN；正数牛顿目标仍需力标定。标准夹爪接口使用 m/N；内部电机限位仍为 [-4.5,0] rad。到位后保持，取消/超时只失能夹爪；同侧硬件故障会停止两个控制器。只读入口也加载 inactive 的夹爪 Action Server。真实夹爪反馈力矩阈值在硬件 YAML 中显式配置为 3 N·m，取 DM-J4310-2EC V1.1 的额定值；协议量程仍为 10 N·m。完整命令、标定与测试见 [夹爪控制器](ros2_ws/src/hei_hardware/GRIPPER.md)。
 
-Rust motorbridge 的串口协议适配说明见 [hei_hardware](ros2_ws/src/hei_hardware/README.md)。原 `robot.launch.py` 仍保持整机 mock。夹爪统一使用共享控制器的标准 `gripper_cmd` Action。
+Rust motorbridge 的串口协议适配说明见 [hei_hardware](ros2_ws/src/hei_hardware/README.md)。`mock_robot.launch.py` 提供独立的整机 mock。夹爪统一使用共享控制器的标准 `gripper_cmd` Action。
 
 ## Agnes Agent 接入
 
@@ -104,7 +145,7 @@ Rust motorbridge 的串口协议适配说明见 [hei_hardware](ros2_ws/src/hei_h
 
 ```bash
 # 默认连接本机已启用的 AgnesHub；Hub 地址与 Web UI 地址不同
-ros2 launch hei_bringup robot.launch.py agent_bridge:=true \
+ros2 launch hei_bringup mock_robot.launch.py agent_bridge:=true \
   agent_hub_url:=ws://127.0.0.1:4180
 # 或在已经运行的机器人栈旁单独启动
 ros2 run hei_agent_bridge agent_bridge --ros-args -p hub_url:=ws://127.0.0.1:4180
@@ -173,3 +214,5 @@ python3 -m pytest -q ros2_ws/tests
 本次不创建不可用的硬件占位插件；没有连接真机的 launch 参数。MoveIt、导航和 VR/LeRobot 接入仍为后续模块。
 
 [ROS 2 架构与范围](/home/cw/gitdir/easeBot/docs/ros2-architecture.zh-CN.md) · [监控节点说明](/home/cw/gitdir/easeBot/ros2_ws/src/hei_monitor/README.md)
+
+2026-10-24 真机监控只读验证：在独立 ROS domain 中临时启动四条总线的只读反馈与 monitor，HTTP 确认 19 个执行器位置持续更新、四条总线在线、夹爪失能反馈、升降 IO 在线及未回零状态；状态接口拒绝 POST（405）。验证后已退出临时进程，没有配置电机模式、使能或执行回零。记录位于机器人 `ros2_ws/log/monitor-hardware-physical-readonly.{log,json}`；夹爪开口仍使用控制器配置的名义映射，不构成实测标定。

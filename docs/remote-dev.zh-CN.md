@@ -161,7 +161,7 @@ source scripts/env/agent-bridge.bash
 source ros2_ws/install/setup.bash
 export ROS_DOMAIN_ID=71
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-ros2 launch hei_bringup robot.launch.py agent_bridge:=true \
+ros2 launch hei_bringup mock_robot.launch.py agent_bridge:=true \
   agent_hub_url:=ws://192.168.1.10:4180
 ```
 

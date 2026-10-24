@@ -4,9 +4,9 @@
 
 | 按键 | 机体速度目标 |
 | --- | --- |
-| W / S | 前进 / 后退，linear.x = ±0.2 m/s |
-| A / D | 左 / 右横移，linear.y = ±0.2 m/s |
-| Q / E | 逆 / 顺时针旋转，angular.z = ±0.5 rad/s |
+| W / S | 前进 / 后退，linear.x = ±0.05 m/s |
+| A / D | 左 / 右横移，linear.y = ±0.05 m/s |
+| Q / E | 逆 / 顺时针旋转，angular.z = ±0.15 rad/s |
 | 空格 | 所有速度归零 |
 | Ctrl+C | 退出 |
 
@@ -26,3 +26,12 @@ ros2 run basic_teleop basic_teleop_node
 可以使用 `ros2 run basic_teleop basic_teleop_node --ros-args -r __ns:=/robot1` 覆盖默认 namespace。
 
 控制值是 ROS 机体速度目标，底盘几何、方向与硬件适配仍以实际验证为准。
+
+速度可以在启动时配置，接受有限非负数；0 可禁用对应平移或旋转轴。参数启动后只读，修改需重启节点：
+
+```bash
+ros2 run basic_teleop basic_teleop_node --ros-args \
+  -p linear_speed:=0.02 -p angular_speed:=0.1
+```
+
+默认平移 0.05 m/s、旋转 0.15 rad/s；该节点也可直接连接 `damiao_base.launch.py read_only:=false` 的真实底盘，默认话题一致。

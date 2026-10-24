@@ -21,6 +21,7 @@ struct CameraDiagnostic {
     received: Instant,
 }
 pub struct Cache {
+    pub hardware: Option<crate::hardware::Hardware>,
     positions: BTreeMap<String, f64>,
     last_joint: Option<Instant>,
     joint_stamp: Option<Stamp>,
@@ -45,6 +46,7 @@ fn age(at: Option<Instant>) -> Option<f64> {
 impl Default for Cache {
     fn default() -> Self {
         Self {
+            hardware: None,
             positions: BTreeMap::new(),
             last_joint: None,
             joint_stamp: None,
@@ -150,7 +152,7 @@ impl Cache {
             .filter(|f| fresh(Some(f.received), 1))
             .map(|f| f.data.clone())
     }
-    pub fn snapshot(&self) -> Value {
+    pub fn snapshot(&mut self) -> Value {
         let live = fresh(self.last_diag, 2);
         let controllers: BTreeMap<String, String> = self
             .manager
@@ -163,6 +165,16 @@ impl Cache {
                 "age_ms":age(frame.map(|f| f.received)), "valid":frame.is_some_and(|f| fresh(Some(f.received),1)),
                 "error":diag.filter(|d| fresh(Some(d.received),2)).map(|d| d.message.as_str()).unwrap_or("diagnostics unavailable")}))
         }).collect();
+        if let Some(hardware) = &mut self.hardware {
+            let mut data = hardware.snapshot();
+            data["base"] = json!(self
+                .base
+                .filter(|(_, at)| fresh(Some(*at), 1))
+                .map(|(v, _)| v));
+            data["uptime_s"] = json!(self.started.elapsed().as_secs_f64());
+            return json!({"system":{"version":"0.2.0 / ROS 2 / Rust", "monitor_read_only":true},
+                "robot":{"available":true,"data":data},"sensors":{"available":true,"data":{"cameras":cameras}}});
+        }
         json!({"system":{"version":"0.2.0 / ROS 2 / Rust", "monitor_read_only":true},
             "robot":{"available":!self.positions.is_empty(),"data":{
                 "robot_id":"HEI ReBot Lift", "backend":self.manager.get("backend").map(String::as_str).unwrap_or("unknown"),

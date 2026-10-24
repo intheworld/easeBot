@@ -38,7 +38,7 @@ ros2 run hei_agent_bridge agent_bridge \
 也可随整套 mock 启动（先按主 README 准备 Rust monitor 环境）：
 
 ```bash
-ros2 launch hei_bringup robot.launch.py agent_bridge:=true \
+ros2 launch hei_bringup mock_robot.launch.py agent_bridge:=true \
   agent_hub_url:=ws://127.0.0.1:4180 agent_device_id:=hei-01
 ```
 

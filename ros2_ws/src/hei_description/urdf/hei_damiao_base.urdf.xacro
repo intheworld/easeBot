@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="hei_damiao_base">
+  <xacro:arg name="config_file" default=""/>
+  <xacro:arg name="read_only" default="true"/>
+  <xacro:arg name="configure_control_mode" default="false"/>
+  <xacro:include filename="$(find hei_description)/urdf/hei_body.urdf"/>
+  <xacro:property name="config" value="${xacro.load_yaml('$(arg config_file)')}"/>
+  <xacro:macro name="wheels" params="items">
+    <xacro:if value="${len(items) > 0}">
+      <xacro:property name="motor" value="${items[0]}"/>
+      <joint name="${motor['name']}">
+        <param name="motor_id">${motor['motor_id']}</param>
+        <param name="feedback_id">${motor['feedback_id']}</param>
+        <param name="model">${motor['model']}</param>
+        <param name="direction">${motor['direction']}</param>
+        <param name="offset">${motor['offset']}</param>
+        <param name="gear_ratio">${motor['gear_ratio']}</param>
+        <param name="p_max">${motor['p_max']}</param>
+        <param name="v_max">${motor['v_max']}</param>
+        <param name="t_max">${motor['t_max']}</param>
+        <param name="velocity_limit">${motor['velocity_limit']}</param>
+        <xacro:unless value="$(arg read_only)">
+          <command_interface name="velocity">
+            <param name="min">${motor['minimum']}</param>
+            <param name="max">${motor['maximum']}</param>
+          </command_interface>
+        </xacro:unless>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+      <xacro:wheels items="${items[1:]}"/>
+    </xacro:if>
+  </xacro:macro>
+  <ros2_control name="HeiDamiaoBase" type="system">
+    <hardware>
+      <plugin>hei_hardware/DamiaoSystem</plugin>
+      <param name="port">${config['port']}</param>
+      <param name="baud">${config['baud']}</param>
+      <param name="read_only">$(arg read_only)</param>
+      <param name="configure_control_mode">$(arg configure_control_mode)</param>
+      <param name="feedback_timeout_ms">${config['feedback_timeout_ms']}</param>
+      <param name="configure_timeout_ms">${config['configure_timeout_ms']}</param>
+    </hardware>
+    <xacro:wheels items="${config['motors']}"/>
+  </ros2_control>
+</robot>

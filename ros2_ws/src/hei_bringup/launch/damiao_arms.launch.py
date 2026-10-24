@@ -56,7 +56,7 @@ def generate_launch_description():
         DeclareLaunchArgument('position_only', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('activate_arm', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('include_gripper', default_value='true', choices=['true', 'false']),
-        DeclareLaunchArgument('configure_control_mode', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('configure_control_mode', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('activate_gripper', default_value='true', choices=['true', 'false']),
         OpaqueFunction(function=setup),
     ])

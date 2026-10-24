@@ -33,6 +33,9 @@ def test_both_grippers_start_and_control_independent_buses(tmp_path, monkeypatch
         adapter = SharedAdapter(config['motors'] + [config['gripper']])
         adapter.arm_mode = 2 if full else 1
         adapter.positions[2] = .01201629638671875
+        # Both grippers may be manually displaced outside the reference target
+        # interval before activation. This is not a hardware fault.
+        adapter.positions[7] = .001335 if side == 'left' else -4.502
         adapters[side] = adapter
         config.update(port=adapter.path, feedback_timeout_ms=500)
         profiles[side] = tmp_path / f'{side}.yaml'
@@ -134,6 +137,28 @@ def test_both_grippers_start_and_control_independent_buses(tmp_path, monkeypatch
                 assert all(wait(h.get_result_async()).status == GoalStatus.STATUS_SUCCEEDED for h in handles)
             assert abs(adapters['left'].positions[7] - (-.18)) < .001
             assert abs(adapters['right'].positions[7] - (-.225)) < .001
+            # Reproduce hand displacement while holding after a completed goal.
+            # Keep feedback outside both ends long enough to cross many read cycles.
+            for side, adapter in adapters.items():
+                adapter.follow_gripper = False
+                adapter.positions[7] = .001335 if side == 'left' else -4.502
+            deadline = time.monotonic() + .25
+            while time.monotonic() < deadline:
+                executor.spin_once(timeout_sec=.02)
+            for side in adapters:
+                listing = node.create_client(ListControllers, f'/{namespace}/{side}_controller_manager/list_controllers')
+                states = {c.name: c.state for c in call(listing, ListControllers.Request()).controller}
+                assert states[f'{side}_gripper_controller'] == 'active'
+                assert states[f'{side}_joint_state_broadcaster'] == 'active'
+                if full:
+                    assert states[f'{side}_arm_controller'] == ('active' if activate else 'inactive')
+                assert adapters[side].enabled[7]
+                # New commands still respect the nominal total gap range [0, .1].
+                assert not wait(clients[side].send_goal_async(gripper_goal(.101, 0.0))).accepted
+                adapters[side].follow_gripper = True
+                handle = wait(clients[side].send_goal_async(gripper_goal(.003, 0.0)))
+                assert handle.accepted
+                assert wait(handle.get_result_async()).status == GoalStatus.STATUS_SUCCEEDED
     finally:
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGINT)

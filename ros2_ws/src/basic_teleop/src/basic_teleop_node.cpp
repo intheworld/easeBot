@@ -1,6 +1,8 @@
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <memory>
+#include <stdexcept>
 
 
 #include <poll.h>
@@ -8,6 +10,7 @@
 #include <unistd.h>
 #include <string>
 #include "rclcpp/rclcpp.hpp"
+#include "rcl_interfaces/msg/parameter_descriptor.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
 
@@ -19,10 +22,19 @@ class TeleopNode: public rclcpp::Node
     TeleopNode()
     : Node("basic_teleop", "/hei")
     {
+      rcl_interfaces::msg::ParameterDescriptor descriptor;
+      descriptor.read_only = true;
+      linear_speed_ = declare_parameter<double>("linear_speed", 0.05, descriptor);
+      angular_speed_ = declare_parameter<double>("angular_speed", 0.15, descriptor);
+      if (!std::isfinite(linear_speed_) || linear_speed_ < 0 ||
+          !std::isfinite(angular_speed_) || angular_speed_ < 0) {
+        throw std::invalid_argument("linear_speed and angular_speed must be finite and nonnegative");
+      }
       publisher_ = this->create_publisher<geometry_msgs::msg::TwistStamped>("base_controller/cmd_vel", 5);
       RCLCPP_INFO(
         get_logger(),
         "W/S: 前进/后退，A/D: 左/右横移，Q/E: 逆/顺时针旋转，空格: 停止，Ctrl+C: 退出");
+      RCLCPP_INFO(get_logger(), "平移速度 %.3f m/s，旋转速度 %.3f rad/s", linear_speed_, angular_speed_);
     }
 
     void run() {
@@ -106,16 +118,17 @@ class TeleopNode: public rclcpp::Node
       command_ = geometry_msgs::msg::Twist{};
 
       switch (key) {
-        case 'w': case 'W': command_.linear.x = 0.2; break;
-        case 's': case 'S': command_.linear.x = -0.2; break;
-        case 'a': case 'A': command_.linear.y = 0.2; break;
-        case 'd': case 'D': command_.linear.y = -0.2; break;
-        case 'q': case 'Q': command_.angular.z = 0.5; break;
-        case 'e': case 'E': command_.angular.z = -0.5; break;
+        case 'w': case 'W': command_.linear.x = linear_speed_; break;
+        case 's': case 'S': command_.linear.x = -linear_speed_; break;
+        case 'a': case 'A': command_.linear.y = linear_speed_; break;
+        case 'd': case 'D': command_.linear.y = -linear_speed_; break;
+        case 'q': case 'Q': command_.angular.z = angular_speed_; break;
+        case 'e': case 'E': command_.angular.z = -angular_speed_; break;
         case ' ': break;  // command_ was reset above: stop all axes.
         default: break;
       }
     }
+    double linear_speed_{0.05}, angular_speed_{0.15};
     geometry_msgs::msg::Twist command_;
     rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr publisher_;
 };
@@ -123,8 +136,14 @@ class TeleopNode: public rclcpp::Node
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<TeleopNode>();
-  node->run();
+  try {
+    auto node = std::make_shared<TeleopNode>();
+    node->run();
+  } catch (const std::exception & error) {
+    RCLCPP_ERROR(rclcpp::get_logger("basic_teleop"), "%s", error.what());
+    if (rclcpp::ok()) { rclcpp::shutdown(); }
+    return 1;
+  }
   if (rclcpp::ok()) {
     rclcpp::shutdown();
   }

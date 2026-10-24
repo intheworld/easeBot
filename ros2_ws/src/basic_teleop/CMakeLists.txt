@@ -11,6 +11,7 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 
@@ -22,6 +23,7 @@ target_compile_features(basic_teleop_node PUBLIC c_std_99 cxx_std_17)  # Require
 ament_target_dependencies(
   basic_teleop_node
   rclcpp
+  rcl_interfaces
   std_msgs
   geometry_msgs
 )

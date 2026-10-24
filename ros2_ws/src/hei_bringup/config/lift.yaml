@@ -1,0 +1,24 @@
+# Reference: hei-rebot-lift _LiftRuntime. SI height, motor VEL, upper switch = software zero.
+port: /dev/hei_lift
+baud: 921600
+motor_id: 1
+feedback_id: 17
+feedback_timeout_ms: 250
+configure_timeout_ms: 2000
+io_port: /dev/hei_lift_io
+io_baud: 115200
+upper_bit: 1
+lower_bit: 2
+io_timeout_sec: 0.5
+io_wait_timeout_sec: 3.0
+up_sign: -1.0
+lead_m_per_rev: 0.01
+position_wrap_rad: 25.0
+home_speed_rad_s: 10.0
+home_timeout_sec: 30.0
+max_speed_rad_s: 18.0
+max_accel_rad_s2: 30.0
+position_kp_rad_s_per_m: 450.0
+position_tolerance_m: 0.001
+minimum_m: -0.8
+maximum_m: 0.0

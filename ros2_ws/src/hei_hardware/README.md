@@ -2,14 +2,14 @@
 
 `hei_hardware/DamiaoSystem` 是 C++ `ros2_control::SystemInterface` 插件，底层通信使用固定版本的 Rust motorbridge，基于 Jazzy/ros2_control 4.44.0 API，连接 HEI 原仓库使用的 USB 转 CAN 串口适配器。默认 921600、8N1；不是 SocketCAN、SLCAN，也不适配所有型号的达妙 USB 设备。
 
-本版支持 DM4310、DM4340：读取位置/速度/力矩，提供固定的 POS_VEL 位置接口或 VEL 速度接口。ros2_control 插件已支持同侧 motor7 Torque_Pos，供 [夹爪控制器](GRIPPER.md) 与六轴并行使用；升降限位/回零和 MIT 力矩控制尚未接入。另保留受限的独立电机诊断工具。默认整机 `robot.launch.py` 仍使用 mock。
+本版支持 DM4310、DM4340：读取位置/速度/力矩，提供固定的 POS_VEL 位置接口或 VEL 速度接口。ros2_control 插件已支持同侧 motor7 Torque_Pos，供 [夹爪控制器](GRIPPER.md) 与六轴并行使用；升降限位/软件回零已由 `LiftSystem` 接入，MIT 力矩控制尚未接入。另保留受限的独立电机诊断工具。正式整机入口 `robot.launch.py` 默认连接全部真实执行器并激活；模拟入口为 `mock_robot.launch.py`。
 
-## 包内两个插件
+## 包内插件
 
-- `hei_hardware/DamiaoSystem`：hardware_interface::SystemInterface，统一管理同侧七个电机和串口。
+- `hei_hardware/DamiaoSystem`：hardware_interface::SystemInterface，管理一个独立串口的电机资源，可用于同侧七电机或四轮 VEL 底盘。
 - `hei_hardware/GripperController`：controller_interface::ControllerInterface，处理标准夹爪 Action，通过资源接口发命令，不直接访问串口。使用说明见 [GRIPPER.md](GRIPPER.md)。
 
-两个插件独立编译、注册到各自的 pluginlib 基类，共同维护在此包；Action 地址保持不变。
+新增 `hei_hardware/LiftSystem` 组合复用 `DamiaoSystem`，提供米制高度与独立限位 IO，不重复实现电机协议；见 [LIFT.md](LIFT.md)。硬件与控制器插件注册到各自 pluginlib 基类，夹爪 Action 地址保持不变。
 
 ## 分层与依赖
 
@@ -20,7 +20,7 @@ ros2_control → hei_hardware (C++ SystemInterface)
             → USB-CAN → 电机
 ```
 
-motorbridge 固定到 `d5700bcd5b7f9355dd2012488d463c3bac982259`，传递依赖由 `motorbridge_backend/Cargo.lock` 锁定。没有复制或修改上游驱动源码，也不依赖 Python SDK、JSON topic bridge 或 Web gateway。C++ 不再实现串口、帧编码与反馈解码。
+motorbridge 固定到 `d5700bcd5b7f9355dd2012488d463c3bac982259`，传递依赖由 `motorbridge_backend/Cargo.lock` 锁定。没有复制或修改上游驱动源码，也不依赖 Python SDK、JSON topic bridge 或 Web gateway。C++ 不再实现电机串口、帧编码与反馈解码；升降适配层只额外管理只读限位 IO 串口。
 
 本地薄适配负责有界手动接收、每帧故障/模式异常锁存、反馈时间戳与无副作用关闭；C++ 负责 ROS 生命周期、关节转换、命令限位和控制器占用。暂不使用上游 C++ Controller 的自动 shutdown，因为其析构会请求失能所有已注册电机；也不使用只保留最新值的通用 ABI 状态缓存，以免遗漏一个批次中的瞬时故障。
 
@@ -90,13 +90,13 @@ ros2_ws/build/hei_hardware/motorbridge-target/release/examples/gripper_probe --m
 串口独占行为由 motorbridge 使用的 serialport 库实现，本工程用 PTY 验证重复打开被拒绝。仍需先退出原驱动和串口调试工具。
 
 ```bash
-ros2 launch hei_bringup damiao_arm.launch.py arm:=right
-# 左臂
-ros2 launch hei_bringup damiao_arm.launch.py arm:=left
+ros2 launch hei_bringup damiao_arm.launch.py arm:=right read_only:=true
+# 左臂只读检查
+ros2 launch hei_bringup damiao_arm.launch.py arm:=left read_only:=true
 ros2 topic echo /hei/joint_states
 ```
 
-默认 `read_only:=true`：URDF 不导出命令接口，加载 inactive 的夹爪控制器以提供可发现的 Action，不加载机械臂控制器，只轮询六个机械臂关节和夹爪 motor7，不发送使能、失能、写零位、模式切换或参数写入。不会启动相机、其他电机或 mock manager。可设置 `monitor:=true` 启动只读页面；此独立入口没有 manager 诊断，监控中的整机模式保持 unknown。
+显式 `read_only:=true` 时：URDF 不导出命令接口，加载 inactive 的夹爪控制器以提供可发现的 Action，不加载机械臂控制器，只轮询六个机械臂关节和夹爪 motor7，不发送使能、失能、写零位、模式切换或参数写入。不会启动相机、其他电机或 mock manager。可设置 `monitor:=true` 启动只读页面；此独立入口没有 manager 诊断，监控中的整机模式保持 unknown。
 
 设备和参考映射见 `hei_bringup/config/right_arm.yaml`、`left_arm.yaml`。使用自己的配置：
 
@@ -111,7 +111,7 @@ ros2 launch hei_bringup damiao_arm.launch.py arm:=right \
 
 ## 显式启用控制接口
 
-先在只读模式核对电机型号、反馈范围、关节方向、零位、传动比及实际位置。六轴命令要求 POS_VEL=2、VEL=3；默认只检查 CTRL_MODE。可显式设置 `configure_control_mode:=true`，在所有可写电机均有新鲜、失能、无故障反馈及已知模式时，临时设置并回读 RAM CTRL_MODE；不保存 EEPROM、不改零位、不使能电机。只读及 state-only 电机不写模式，运行中模式改变仍触发故障；夹爪在失能反馈下设置/回读 RAM Torque_Pos=4，不保存 EEPROM、不改零位。写模式要求电机最初为失能状态，拒绝接管已使能的电机。
+先在只读模式核对电机型号、反馈范围、关节方向、零位、传动比及实际位置。六轴位置命令要求 POS_VEL=2，速度命令要求 VEL=3；默认 `configure_control_mode:=true`，在所有可写电机均有新鲜、失能、无故障反馈及已知模式时，临时设置并回读 RAM CTRL_MODE；不保存 EEPROM、不改零位、不使能电机。只读及 state-only 电机不写模式，运行中模式改变仍触发故障；夹爪在失能反馈下设置/回读 RAM Torque_Pos=4，不保存 EEPROM、不改零位。写模式要求电机最初为失能状态，拒绝接管已使能的电机。
 
 ```bash
 ros2 launch hei_bringup damiao_arm.launch.py arm:=right read_only:=false \
@@ -125,9 +125,9 @@ ros2 launch hei_bringup damiao_arm.launch.py arm:=right read_only:=false \
   include_gripper:=false configure_control_mode:=true
 ```
 
-该选项默认关闭，不会为已使能或故障电机清错/强制失能。模式回读正确后启动完成，轨迹控制器默认自动 active（`activate_arm:=false` 可关闭）；六轴当前位置超出参考目标范围不再阻止激活。激活控制器会使能六轴，需先核对零位/限位并支撑机械臂。
+该选项默认开启，不会为已使能或故障电机清错/强制失能。模式回读正确后启动完成，轨迹控制器默认自动 active（`activate_arm:=false` 可关闭）；六轴当前位置超出参考目标范围不再阻止激活。激活控制器会使能六轴，需先核对零位/限位并支撑机械臂。
 
-单侧可写入口默认自动激活 `right_arm_controller`，`right_gripper_controller` 默认 inactive；传 `activate_arm:=false` 可保留手动激活流程。硬件 activate 本身不发使能，机械臂控制器激活时使能六轴。手动启用命令：
+单侧可写入口默认自动激活 `right_arm_controller`，`right_gripper_controller` 也默认 active；传 `activate_arm:=false` 可保留手动激活流程。硬件 activate 本身不发使能，机械臂控制器激活时使能六轴。手动启用命令：
 
 ```bash
 ros2 control switch_controllers -c /hei/controller_manager \
@@ -168,6 +168,10 @@ motor_target   = joint_target * direction * gear_ratio + offset
 ros2 launch hei_bringup damiao_arms.launch.py configure_control_mode:=true
 ```
 
-默认可写，双臂控制器与夹爪控制器自动 active；六轴使能并初始化当前位置保持，夹爪收到目标才使能。`activate_arm:=false` 将两侧机械臂控制器留在 inactive；`read_only:=true` 不加载机械臂控制器且禁止全部电机写操作；`include_gripper:=false` 不加载夹爪。`configure_control_mode` 默认 false，可显式 true 完成失能电机的 RAM 模式配置。
+默认可写，双臂控制器与夹爪控制器自动 active；六轴使能并初始化当前位置保持，夹爪收到目标才使能。`activate_arm:=false` 将两侧机械臂控制器留在 inactive；`read_only:=true` 不加载机械臂控制器且禁止全部电机写操作；`include_gripper:=false` 不加载夹爪。`configure_control_mode` 默认 true，可显式 false 只检查已有模式。
 
 管理器分别为 `/hei/left_controller_manager` 和 `/hei/right_controller_manager`，机械臂轨迹 Action 分别为 `/hei/left_arm_controller/follow_joint_trajectory` 和 `/hei/right_arm_controller/follow_joint_trajectory`。左右状态及 TF 树按 `left_`、`right_` 前缀隔离，与双侧夹爪调试入口一致；此入口不合并全机器人 TF。两侧 YAML 可通过 `left_config_file`、`right_config_file` 指定，重复串口在启动前拒绝。`position_only:=true` 默认沿用夹爪电流比例 0.05，标准夹爪目标使用 `max_effort: 0`；使用力标定时传 `position_only:=false`。
+
+底盘入口、轮序、VEL 模式和 TwistStamped 命令见 [BASE.md](BASE.md)。
+
+夹爪反馈位置与目标位置范围分开处理：左右夹爪的实测位置超出 [-4.5, 0] rad 不再触发硬件 ERROR，也不阻止控制器占用接口；新目标仍受配置角度范围约束，反馈力矩阈值和通信/模式故障检查保留。

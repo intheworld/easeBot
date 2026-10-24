@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="hei_damiao_lift">
+  <xacro:arg name="config_file" default=""/>
+  <xacro:arg name="read_only" default="true"/>
+  <xacro:arg name="home" default="false"/>
+  <xacro:arg name="configure_control_mode" default="false"/>
+  <xacro:include filename="$(find hei_description)/urdf/hei_body.urdf"/>
+  <xacro:property name="config" value="${xacro.load_yaml('$(arg config_file)')}"/>
+  <ros2_control name="HeiDamiaoLift" type="system">
+    <hardware>
+      <plugin>hei_hardware/LiftSystem</plugin>
+      <param name="read_only">$(arg read_only)</param>
+      <param name="home_on_activate">$(arg home)</param>
+      <param name="configure_control_mode">$(arg configure_control_mode)</param>
+      <param name="port">${config['port']}</param>
+      <param name="baud">${config['baud']}</param>
+      <param name="motor_id">${config['motor_id']}</param>
+      <param name="feedback_id">${config['feedback_id']}</param>
+      <param name="feedback_timeout_ms">${config['feedback_timeout_ms']}</param>
+      <param name="configure_timeout_ms">${config['configure_timeout_ms']}</param>
+      <param name="io_port">${config['io_port']}</param>
+      <param name="io_baud">${config['io_baud']}</param>
+      <param name="upper_bit">${config['upper_bit']}</param>
+      <param name="lower_bit">${config['lower_bit']}</param>
+      <param name="io_timeout_sec">${config['io_timeout_sec']}</param>
+      <param name="io_wait_timeout_sec">${config['io_wait_timeout_sec']}</param>
+      <param name="up_sign">${config['up_sign']}</param>
+      <param name="lead_m_per_rev">${config['lead_m_per_rev']}</param>
+      <param name="position_wrap_rad">${config['position_wrap_rad']}</param>
+      <param name="home_speed_rad_s">${config['home_speed_rad_s']}</param>
+      <param name="home_timeout_sec">${config['home_timeout_sec']}</param>
+      <param name="max_speed_rad_s">${config['max_speed_rad_s']}</param>
+      <param name="max_accel_rad_s2">${config['max_accel_rad_s2']}</param>
+      <param name="position_kp_rad_s_per_m">${config['position_kp_rad_s_per_m']}</param>
+      <param name="position_tolerance_m">${config['position_tolerance_m']}</param>
+      <param name="minimum_m">${config['minimum_m']}</param>
+      <param name="maximum_m">${config['maximum_m']}</param>
+    </hardware>
+    <joint name="lift_joint">
+      <xacro:unless value="$(arg read_only)">
+        <command_interface name="position">
+          <param name="min">${config['minimum_m']}</param>
+          <param name="max">${config['maximum_m']}</param>
+        </command_interface>
+      </xacro:unless>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <gpio name="lift_status">
+      <state_interface name="upper"/>
+      <state_interface name="lower"/>
+      <state_interface name="io_online"/>
+      <state_interface name="homed"/>
+      <state_interface name="phase"/>
+      <state_interface name="motor_position"/>
+      <state_interface name="motor_torque"/>
+    </gpio>
+  </ros2_control>
+</robot>

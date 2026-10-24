@@ -1,0 +1,7 @@
+/**/lift_controller:
+  ros__parameters:
+    constraints:
+      goal_time: 4.0
+      stopped_velocity_tolerance: 0.001
+      lift_joint:
+        goal: 0.002

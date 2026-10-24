@@ -1,0 +1,58 @@
+# Reference ID order: RF, RR, LR, LF. Verify physical wheel directions before driving.
+port: /dev/hei_chassis
+baud: 921600
+feedback_timeout_ms: 250
+configure_timeout_ms: 2000
+motors:
+- name: front_right_wheel_joint
+  motor_id: 1
+  feedback_id: 17
+  model: DM4310
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 30.0
+  t_max: 10.0
+  velocity_limit: 9.0
+  minimum: -9.0
+  maximum: 9.0
+- name: rear_right_wheel_joint
+  motor_id: 2
+  feedback_id: 18
+  model: DM4310
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 30.0
+  t_max: 10.0
+  velocity_limit: 9.0
+  minimum: -9.0
+  maximum: 9.0
+- name: rear_left_wheel_joint
+  motor_id: 3
+  feedback_id: 19
+  model: DM4310
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 30.0
+  t_max: 10.0
+  velocity_limit: 9.0
+  minimum: -9.0
+  maximum: 9.0
+- name: front_left_wheel_joint
+  motor_id: 4
+  feedback_id: 20
+  model: DM4310
+  direction: 1
+  offset: 0.0
+  gear_ratio: 1.0
+  p_max: 12.5
+  v_max: 30.0
+  t_max: 10.0
+  velocity_limit: 9.0
+  minimum: -9.0
+  maximum: 9.0

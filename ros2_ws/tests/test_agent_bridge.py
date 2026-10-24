@@ -101,7 +101,7 @@ def test_mhs_registration_readonly_tools_images_reconnect_and_shutdown(monkeypat
             with tempfile.TemporaryDirectory(prefix='hei-agent-') as temp, tempfile.TemporaryFile(mode='w+') as log:
                 env = {**os.environ, 'ROS_LOG_DIR': temp, 'NO_PROXY': '127.0.0.1,localhost'}
                 env.pop('LD_PRELOAD', None)  # Do not inject the tool host's network proxy into ROS C++ nodes.
-                launch = subprocess.Popen(['ros2', 'launch', 'hei_bringup', 'robot.launch.py',
+                launch = subprocess.Popen(['ros2', 'launch', 'hei_bringup', 'mock_robot.launch.py',
                     'monitor:=false', 'agent_bridge:=true', f'agent_hub_url:=ws://127.0.0.1:{port}',
                     'agent_device_id:=hei-test-01'], env=env, stdout=log, stderr=log, start_new_session=True)
                 async def until(predicate, timeout=20):

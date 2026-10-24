@@ -6,10 +6,10 @@
 
 ## 启动
 
-加载 Jazzy 与工程环境（机器人使用 `~/hei_jazzy_deps/install/setup.bash`），不能混用 Humble。正式入口默认只读，不使能、不切换模式；会加载 inactive 的夹爪控制器，Action 可以被发现，但拒绝运动目标：
+加载 Jazzy 与工程环境（机器人使用 `~/hei_jazzy_deps/install/setup.bash`），不能混用 Humble。单侧正式入口默认可写并激活机械臂和夹爪。只读检查需显式指定参数，夹爪控制器保持 inactive，拒绝运动目标：
 
 ```bash
-ros2 launch hei_bringup damiao_arm.launch.py arm:=right
+ros2 launch hei_bringup damiao_arm.launch.py arm:=right read_only:=true
 ```
 
 只调试夹爪时，先退出占用同侧串口的旧 launch，然后启动：
@@ -33,7 +33,7 @@ ros2 launch hei_bringup damiao_arm.launch.py arm:=right read_only:=false
 ros2 control list_controllers -c /hei/controller_manager
 ```
 
-单侧机械臂控制器默认自动 active（`activate_arm:=false` 可关闭），夹爪控制器默认 inactive。六轴要求 POS_VEL=2；若仍为 MIT=1，可显式使用 `configure_control_mode:=true` 在新鲜失能反馈下临时设置并回读模式，不使能、不保存 EEPROM。默认不自动切换。motor7 在新鲜失能反馈下设置/回读 RAM Torque_Pos=4，不保存 EEPROM、不改零位。六轴激活仍检查模式、反馈和故障状态；不因当前位置超出参考目标范围拒绝激活。夹爪的位置/力矩保护保留。
+单侧机械臂控制器默认自动 active（`activate_arm:=false` 可关闭），夹爪控制器也默认 active，并使用位置模式。六轴要求 POS_VEL=2，默认 `configure_control_mode:=true` 在新鲜失能反馈下临时设置并回读模式，不保存 EEPROM；可显式 false 只检查已有模式。motor7 在新鲜失能反馈下设置/回读 RAM Torque_Pos=4，不保存 EEPROM、不改零位。六轴激活仍检查模式、反馈和故障状态；不因当前位置超出参考目标范围拒绝激活。夹爪目标位置限位和反馈力矩保护保留；反馈位置超过目标范围不再导致硬件故障或拒绝控制器激活。
 
 现场确认后同时激活（机械臂控制器激活会使能六轴）：
 
@@ -146,3 +146,5 @@ python3 -m pytest -q tests/test_shared_gripper.py
 原先隐藏的 0.5 N·m 缺省值与 1 N·m 配置上限已移除；缺少阈值会拒绝可写配置。阈值必须为正且不超过配置的力矩协议量程。`t_max: 10` 仍是协议量程，不能改为额定力矩；5% 电流限制与该软件阈值分别执行，均不表示夹持力的牛顿标定。反馈超出该阈值时仍按共享硬件故障停用控制器，日志记录实际值。
 
 双臂和双夹爪一起使用 `ros2 launch hei_bringup damiao_arms.launch.py configure_control_mode:=true`，四个运动控制器默认自动 active；夹爪仍收到目标才使能。
+
+左右夹爪共用相同策略：目标角度仍限制在配置范围内，手动扰动造成的反馈角度越界不停止控制器、不锁存硬件故障，也不阻止再次激活。到位后的限流保持行为不变；手动掰动不会自动取消保持目标。反馈力矩超限、通信超时、电机故障和模式变化仍走原有停止流程。

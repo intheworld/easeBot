@@ -18,3 +18,5 @@ HEI mappings and reference ranges originate from `lipengdong/hei-rebot-lift`, co
 Robot-specific YAML profiles now live in `hei_bringup/config/`. Protocol ranges remain configurable and must match firmware. Sample direction/offset/ratio values are references, not measured calibration.
 
 Plugin API: [ros2_control Jazzy hardware components](https://control.ros.org/jazzy/doc/ros2_control/hardware_interface/doc/writing_new_hardware_component.html).
+
+`LiftSystem` 组合现有 `DamiaoSystem`，不增加电机后端 ABI 或固件设零操作。限位 IO 的只读 7 字节帧/CRC16 解析与软件多圈高度参考来自 hei-rebot-lift 的 `_LimitSwitchReader`、`_MultiTurnPositionTracker` 和 `_LiftRuntime`；新增 IO 新鲜度检查、矛盾限位故障、变化率限制后的方向阻挡及停止确认后的软件回零。

@@ -42,7 +42,7 @@ def test_native_launch_controls_topics_stop_and_readonly_monitor():
     with tempfile.TemporaryDirectory(prefix='hei-native-') as temp:
         env['ROS_LOG_DIR'] = temp
         with open(Path(temp) / 'launch.log', 'w+') as log:
-            launch = subprocess.Popen(['ros2', 'launch', 'hei_bringup', 'robot.launch.py',
+            launch = subprocess.Popen(['ros2', 'launch', 'hei_bringup', 'mock_robot.launch.py',
                                        f'monitor_port:={port}'], env=env, stdout=log, stderr=log, start_new_session=True)
             node = None
             rclpy.init()

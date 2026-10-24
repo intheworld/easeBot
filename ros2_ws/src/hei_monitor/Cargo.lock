@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "action_msgs"
+version = "2.0.3"
+dependencies = [
+ "builtin_interfaces",
+ "rosidl_runtime_rs",
+ "service_msgs",
+ "unique_identifier_msgs",
+]
+
+[[package]]
 name = "ament_rs"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -265,6 +275,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "control_msgs"
+version = "5.9.0"
+dependencies = [
+ "action_msgs",
+ "builtin_interfaces",
+ "geometry_msgs",
+ "rosidl_runtime_rs",
+ "sensor_msgs",
+ "service_msgs",
+ "std_msgs",
+ "trajectory_msgs",
+ "unique_identifier_msgs",
+]
+
+[[package]]
+name = "controller_manager_msgs"
+version = "4.44.0"
+dependencies = [
+ "builtin_interfaces",
+ "lifecycle_msgs",
+ "rosidl_runtime_rs",
+ "service_msgs",
+ "std_msgs",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -486,6 +522,8 @@ version = "0.2.0"
 dependencies = [
  "axum",
  "bytes",
+ "control_msgs",
+ "controller_manager_msgs",
  "diagnostic_msgs",
  "fs2",
  "nav_msgs",
@@ -629,6 +667,15 @@ checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
 dependencies = [
  "cfg-if",
  "windows-link",
+]
+
+[[package]]
+name = "lifecycle_msgs"
+version = "2.0.3"
+dependencies = [
+ "builtin_interfaces",
+ "rosidl_runtime_rs",
+ "service_msgs",
 ]
 
 [[package]]
@@ -1072,10 +1119,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "trajectory_msgs"
+version = "5.3.8"
+dependencies = [
+ "builtin_interfaces",
+ "geometry_msgs",
+ "rosidl_runtime_rs",
+ "std_msgs",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unique_identifier_msgs"
+version = "2.5.0"
+dependencies = [
+ "rosidl_runtime_rs",
+]
 
 [[package]]
 name = "uuid"
@@ -1223,10 +1287,6 @@ name = "ackermann_msgs"
 version = "2.0.2"
 
 [[patch.unused]]
-name = "action_msgs"
-version = "2.0.3"
-
-[[patch.unused]]
 name = "action_tutorials_interfaces"
 version = "0.33.10"
 
@@ -1251,14 +1311,6 @@ name = "composition_interfaces"
 version = "2.0.3"
 
 [[patch.unused]]
-name = "control_msgs"
-version = "5.9.0"
-
-[[patch.unused]]
-name = "controller_manager_msgs"
-version = "4.44.0"
-
-[[patch.unused]]
 name = "dwb_msgs"
 version = "1.3.11"
 
@@ -1277,10 +1329,6 @@ version = "2.1.2"
 [[patch.unused]]
 name = "graph_msgs"
 version = "0.2.0"
-
-[[patch.unused]]
-name = "lifecycle_msgs"
-version = "2.0.3"
 
 [[patch.unused]]
 name = "logging_demo"
@@ -1403,20 +1451,12 @@ name = "topic_tools_interfaces"
 version = "1.3.3"
 
 [[patch.unused]]
-name = "trajectory_msgs"
-version = "5.3.8"
-
-[[patch.unused]]
 name = "turtlesim"
 version = "1.8.3"
 
 [[patch.unused]]
 name = "type_description_interfaces"
 version = "2.0.3"
-
-[[patch.unused]]
-name = "unique_identifier_msgs"
-version = "2.5.0"
 
 [[patch.unused]]
 name = "vision_msgs"

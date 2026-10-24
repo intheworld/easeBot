@@ -25,9 +25,10 @@
 <article class="camera" data-camera="right_wrist"><div class="camera-head"><strong>右腕相机</strong><span class="camera-status">等待</span></div><div class="image-wrap"><img alt="右腕相机实时预览"><div class="camera-unavailable">等待图像</div></div><div class="camera-foot"><span>right_wrist</span><span class="camera-detail">—</span></div></article>
 </div></section>
 <section id="state"><div class="section-title"><h2>本体状态</h2><span>机械臂 rad · 夹爪/升降 m · 底盘 m/s 和 rad/s</span></div><div class="state-grid">
-<article class="panel"><div class="panel-head"><h3>双臂与夹爪</h3><span>右臂 / 左臂</span></div><table><thead><tr><th>通道</th><th>右侧</th><th>左侧</th></tr></thead><tbody id="joints"></tbody></table></article>
-<article class="panel"><div class="panel-head"><h3>升降与底盘</h3><span>ROS 2 标准反馈</span></div><dl><div><dt>升降位置</dt><dd id="lift">—</dd></div><div><dt>升降回零</dt><dd id="homed">—</dd></div><div><dt>底盘 X / Y / θ</dt><dd id="base">—</dd></div><div><dt>物理急停</dt><dd class="muted">未知 · 未接入反馈</dd></div><div><dt>控制服务持续时间</dt><dd id="uptime">—</dd></div></dl></article>
+<article class="panel"><div class="panel-head"><h3>双臂与夹爪</h3><span>右臂 / 左臂</span></div><table><thead><tr><th>通道</th><th>右侧</th><th>左侧</th></tr></thead><tbody id="joints"></tbody></table><p class="muted">机械臂、底盘电机使能反馈：未知；控制器状态见下方。</p></article>
+<article class="panel"><div class="panel-head"><h3>升降与底盘</h3><span>ROS 2 标准反馈</span></div><dl><div><dt>升降位置</dt><dd id="lift">—</dd></div><div><dt>升降回零</dt><dd id="homed">—</dd></div><div><dt>升降阶段</dt><dd id="lift-phase">—</dd></div><div><dt>上下限位</dt><dd id="lift-limits">—</dd></div><div><dt>底盘速度 vx / vy / wz</dt><dd id="base">—</dd></div><div><dt>物理急停</dt><dd class="muted">未知 · 未接入反馈</dd></div><div><dt>控制服务持续时间</dt><dd id="uptime">—</dd></div></dl></article>
 </div></section>
+<section id="hardware" hidden><div class="section-title"><h2>执行器连接与控制器</h2><span>各总线独立判断数据新鲜度</span></div><article class="panel"><table><thead><tr><th>总线</th><th>反馈</th><th>数据年龄</th><th>控制器状态</th></tr></thead><tbody id="buses"></tbody></table></article></section>
 <section id="events"><div class="section-title"><h2>运行事件</h2><span id="fault">无已报告故障</span></div><article class="panel event-panel"><div id="event-list" class="events">等待运行事件</div></article></section>
 <footer><span>easeBot <span id="version">0.2.0 / ROS 2</span> · HEI ReBot Lift</span><span>仅展示状态，不提供运动或维护操作</span></footer>
 </main>

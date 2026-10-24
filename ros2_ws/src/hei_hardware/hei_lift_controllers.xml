@@ -1,0 +1,5 @@
+<library path="hei_hardware_lift_controller">
+  <class name="hei_hardware/LiftTrajectoryController" type="hei_hardware::LiftTrajectoryController" base_class_type="controller_interface::ControllerInterface">
+    <description>Standard JointTrajectoryController with lift height validation and recoverable trajectory errors.</description>
+  </class>
+</library>

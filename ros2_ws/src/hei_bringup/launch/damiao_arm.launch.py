@@ -1,4 +1,4 @@
-"""One real Damiao arm and gripper sharing one serial owner. Defaults to feedback polling with no command interfaces."""
+"""One real Damiao arm and gripper sharing one serial owner. Controllers are active by default."""
 import math
 import re
 from pathlib import Path
@@ -129,13 +129,13 @@ def generate_launch_description():
         DeclareLaunchArgument('hardware_name', default_value='HeiDamiaoArm'),
         DeclareLaunchArgument('config_file', default_value=''),
         DeclareLaunchArgument('arm_read_only', default_value='false', choices=['true', 'false']),
-        DeclareLaunchArgument('gripper_position_only', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('gripper_position_only', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('activate_arm', default_value='true', choices=['true', 'false']),
-        DeclareLaunchArgument('activate_gripper', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('activate_gripper', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('include_gripper', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('gripper_config_file', default_value=''),
-        DeclareLaunchArgument('read_only', default_value='true', choices=['true', 'false']),
-        DeclareLaunchArgument('configure_control_mode', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('read_only', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('configure_control_mode', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('monitor', default_value='false'),
         OpaqueFunction(function=setup),
     ])

@@ -389,14 +389,10 @@ Result DamiaoSystem::read(const rclcpp::Time &, const rclcpp::Duration &)
         m.mode != m.expected_mode)) { return fail(m.name + ": stale or changed CTRL_MODE"); }
       if (m.owned) {
         if (m.gripper) {
-          const bool position_exceeded = m.position < m.minimum - 0.000383 || m.position > m.maximum + 0.000383;
           const bool torque_exceeded = std::abs(m.effort) > m.torque_limit;
-          if (position_exceeded || torque_exceeded) {
-            return fail(m.name + ": gripper feedback limit: position_exceeded=" +
-              std::to_string(position_exceeded) + ", torque_exceeded=" + std::to_string(torque_exceeded) +
-              ", position_rad=" + std::to_string(m.position) + ", range_rad=[" +
-              std::to_string(m.minimum) + ", " + std::to_string(m.maximum) +
-              "], position_margin_rad=0.000383, torque_nm=" + std::to_string(m.effort) +
+          if (torque_exceeded) {
+            return fail(m.name + ": gripper feedback torque limit: torque_exceeded=1" +
+              ", position_rad=" + std::to_string(m.position) + ", torque_nm=" + std::to_string(m.effort) +
               ", torque_limit_nm=" + std::to_string(m.torque_limit) +
               ", commanded_velocity_rad_s=" + std::to_string(m.speed_command) +
               ", commanded_current_ratio=" + std::to_string(m.current_command));
@@ -513,9 +509,7 @@ Result DamiaoSystem::perform_command_mode_switch(
       if (std::find(start.begin(), start.end(), key) == start.end()) { continue; }
       if (!active_ || !fresh(m) || m.mode_changed || m.fault_status > 1 || m.status != (m.owned ? 1 : 0) ||
         m.mode != m.expected_mode ||
-        Clock::now() - m.mode_received > feedback_timeout_ ||
-        (m.gripper &&
-          (m.position < m.minimum - 0.000383 || m.position > m.maximum + 0.000383))) {
+        Clock::now() - m.mode_received > feedback_timeout_) {
         return fail(m.name + ": motor is not ready to be claimed");
       }
     }
