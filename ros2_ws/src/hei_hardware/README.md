@@ -51,7 +51,7 @@ C++ 测试通过 Linux PTY 模拟适配器和电机，检查真实串口读写�
 
 额外只读查询 CTRL_MODE：六个电机均为 MIT=1、失能=0，无故障。当前插件的 position 接口要求 POS_VEL=2，因此暂不能直接启用轨迹控制器。参考原 HEI 驱动在连接时会切换六轴到 POS_VEL；本次没有修改任何固件参数。
 
-参考方向/零偏下关节位置依次约为 `[-0.00477, 0.01202, -0.00973, 0.01888, -0.03986, -0.05436] rad`。joint2 高于当前参考上限 0，插件会拒绝占用接口；这些读数尚不构成机械零位或方向的校准证明。需要先核对真实姿态与校准，再准备运动模式和小幅轨迹，不应直接放宽限位绕过检查。
+参考方向/零偏下关节位置依次约为 `[-0.00477, 0.01202, -0.00973, 0.01888, -0.03986, -0.05436] rad`。joint2 高于参考目标上限 0。参考范围仅约束新目标，不再用于拒绝六轴激活；激活时先保持实测位置，不在硬件插件中将保持目标裁剪到边界。允许从该启动位置插值返回参考范围，不允许继续向范围外扩展；首次收到范围内目标后，启动例外失效。Damiao 启动入口关闭 controller_manager 的通用命令限位器，避免它依据 URDF 的参考范围拒绝当前实测位置；命令范围仍由硬件适配器检查。这些读数不构成机械零位或方向的校准证明。
 
 机器人记录：`ros2_ws/log/physical-right-arm-readonly.{log,json}`、`physical-right-arm-firmware-readonly.json`；本地副本在 `ros2_ws/log/robot-jazzy/`。
 
@@ -111,14 +111,23 @@ ros2 launch hei_bringup damiao_arm.launch.py arm:=right \
 
 ## 显式启用控制接口
 
-先在只读模式核对电机型号、反馈范围、关节方向、零位、传动比及实际位置。固件必须事先处于对应模式：POS_VEL=2、VEL=3；六轴只读取 CTRL_MODE，不自动修改其模式；夹爪在失能反馈下设置/回读 RAM Torque_Pos=4，不保存 EEPROM、不改零位。写模式要求电机最初为失能状态，拒绝接管已使能的电机。
+先在只读模式核对电机型号、反馈范围、关节方向、零位、传动比及实际位置。六轴命令要求 POS_VEL=2、VEL=3；默认只检查 CTRL_MODE。可显式设置 `configure_control_mode:=true`，在所有可写电机均有新鲜、失能、无故障反馈及已知模式时，临时设置并回读 RAM CTRL_MODE；不保存 EEPROM、不改零位、不使能电机。只读及 state-only 电机不写模式，运行中模式改变仍触发故障；夹爪在失能反馈下设置/回读 RAM Torque_Pos=4，不保存 EEPROM、不改零位。写模式要求电机最初为失能状态，拒绝接管已使能的电机。
 
 ```bash
 ros2 launch hei_bringup damiao_arm.launch.py arm:=right read_only:=false \
   config_file:=/absolute/path/right_arm.local.yaml
 ```
 
-此时配置 `right_arm_controller` 和 `right_gripper_controller` 为 inactive，硬件 activate 本身不发使能。操作员确认配置与现场条件后，另一个相同 ROS 环境的终端可显式启用：
+如果启动日志出现 `CTRL_MODE mismatch`，且六轴已失能，可先用六轴配置入口：
+
+```bash
+ros2 launch hei_bringup damiao_arm.launch.py arm:=right read_only:=false \
+  include_gripper:=false configure_control_mode:=true
+```
+
+该选项默认关闭，不会为已使能或故障电机清错/强制失能。模式回读正确后启动完成，轨迹控制器默认自动 active（`activate_arm:=false` 可关闭）；六轴当前位置超出参考目标范围不再阻止激活。激活控制器会使能六轴，需先核对零位/限位并支撑机械臂。
+
+单侧可写入口默认自动激活 `right_arm_controller`，`right_gripper_controller` 默认 inactive；传 `activate_arm:=false` 可保留手动激活流程。硬件 activate 本身不发使能，机械臂控制器激活时使能六轴。手动启用命令：
 
 ```bash
 ros2 control switch_controllers -c /hei/controller_manager \
@@ -148,3 +157,17 @@ motor_target   = joint_target * direction * gear_ratio + offset
 - 当前反馈位置为电机协议给出的有限区间值；尚未提供连续轮轴多圈展开，不能直接作为已验证的底盘里程计。
 
 协议和参考配置来源见 [SOURCE.md](SOURCE.md)。
+
+
+2026-10-23 右臂启动复核：显式开启 `configure_control_mode` 后，六轴在失能状态下完成 RAM MIT=1 → POS_VEL=2 的配置与回读。实机启动到 `right_arm_controller: inactive` 成功，验证进程已退出；未激活六轴或发送轨迹。退出后只读确认六轴均模式 2、失能 0、无故障，未保存 EEPROM。joint2 的 +0.012016 rad 与参考上限 0 的差异仍待核对，不能将启动成功视为运动验收。
+
+
+## 双臂统一启动
+
+```bash
+ros2 launch hei_bringup damiao_arms.launch.py configure_control_mode:=true
+```
+
+默认可写，双臂控制器与夹爪控制器自动 active；六轴使能并初始化当前位置保持，夹爪收到目标才使能。`activate_arm:=false` 将两侧机械臂控制器留在 inactive；`read_only:=true` 不加载机械臂控制器且禁止全部电机写操作；`include_gripper:=false` 不加载夹爪。`configure_control_mode` 默认 false，可显式 true 完成失能电机的 RAM 模式配置。
+
+管理器分别为 `/hei/left_controller_manager` 和 `/hei/right_controller_manager`，机械臂轨迹 Action 分别为 `/hei/left_arm_controller/follow_joint_trajectory` 和 `/hei/right_arm_controller/follow_joint_trajectory`。左右状态及 TF 树按 `left_`、`right_` 前缀隔离，与双侧夹爪调试入口一致；此入口不合并全机器人 TF。两侧 YAML 可通过 `left_config_file`、`right_config_file` 指定，重复串口在启动前拒绝。`position_only:=true` 默认沿用夹爪电流比例 0.05，标准夹爪目标使用 `max_effort: 0`；使用力标定时传 `position_only:=false`。

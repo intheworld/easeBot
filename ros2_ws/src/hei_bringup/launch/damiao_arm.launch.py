@@ -41,10 +41,14 @@ def setup(context):
         str(Path(get_package_share_directory('hei_description')) / 'urdf/hei_damiao_arm.urdf.xacro'),
         mappings={'config_file': config_file, 'read_only': LaunchConfiguration('read_only').perform(context),
                   'include_gripper': str(include_gripper).lower(),
-                  'arm_read_only': str(arm_read_only).lower(), 'hardware_name': hardware_name}).toxml()
+                  'arm_read_only': str(arm_read_only).lower(), 'hardware_name': hardware_name,
+                  'configure_control_mode': LaunchConfiguration('configure_control_mode').perform(context)}).toxml()
     controllers = str(Path(get_package_share_directory('hei_control')) / 'config/controllers.yaml')
     gripper_config = LaunchConfiguration('gripper_config_file').perform(context) or str(Path(get_package_share_directory('hei_control')) / 'config/damiao_gripper.yaml')
     manager_parameters = yaml.safe_load(Path(controllers).read_text())['/**/controller_manager']['ros__parameters']
+    # The hardware adapter validates targets. The generic URDF limiter also
+    # rejects measured startup positions outside the reference model range.
+    manager_parameters['enforce_command_limits'] = False
     manager_parameters[states_name] = {'type': 'joint_state_broadcaster/JointStateBroadcaster'}
     parameters = [controllers, manager_parameters]
     writable = LaunchConfiguration('read_only').perform(context) == 'false'
@@ -79,8 +83,11 @@ def setup(context):
                    parameters=parameters, output='screen')
     states = Node(package='controller_manager', executable='spawner', namespace=namespace,
                   arguments=[states_name, '-c', manager_path], output='screen')
+    motion_args = [f'{arm}_arm_controller', '-c', manager_path]
+    if LaunchConfiguration('activate_arm').perform(context) != 'true':
+        motion_args.append('--inactive')
     motion = Node(package='controller_manager', executable='spawner', namespace=namespace,
-                  arguments=[f'{arm}_arm_controller', '--inactive', '-c', manager_path], output='screen')
+                  arguments=motion_args, output='screen')
     gripper_args = [f'{arm}_gripper_controller', '-c', manager_path, '--param-file', gripper_config]
     if position_only:
         gripper_args += ['--param-file', position_config]
@@ -123,10 +130,12 @@ def generate_launch_description():
         DeclareLaunchArgument('config_file', default_value=''),
         DeclareLaunchArgument('arm_read_only', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('gripper_position_only', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('activate_arm', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('activate_gripper', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('include_gripper', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('gripper_config_file', default_value=''),
         DeclareLaunchArgument('read_only', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('configure_control_mode', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('monitor', default_value='false'),
         OpaqueFunction(function=setup),
     ])

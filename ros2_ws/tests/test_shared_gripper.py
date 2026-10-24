@@ -111,7 +111,7 @@ def stack(tmp_path, monkeypatch, request):
     ns = 'shared_' + uuid.uuid4().hex[:8]
     log_path = tmp_path / 'shared.log'
     log = log_path.open('w')
-    process = subprocess.Popen(['ros2', 'launch', 'hei_bringup', 'damiao_arm.launch.py',
+    process = subprocess.Popen(['ros2', 'launch', 'hei_bringup', 'damiao_arm.launch.py', 'activate_arm:=false',
         f'namespace:={ns}', f'config_file:={config_path}', f'gripper_config_file:={controller_path}',
         f'read_only:={str(readonly).lower()}',
         *(['arm_read_only:=true', 'activate_gripper:=true', 'gripper_position_only:=true'] if debug else [])], stdout=log, stderr=log, env=os.environ.copy(), start_new_session=True)

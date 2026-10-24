@@ -4,7 +4,7 @@ Production transport and protocol come from [motorbridge](https://github.com/mot
 
 - `motor_core::dm_serial::DmSerialBus`: serial settings, exclusive open, 30-byte USB-CAN transmit frames, 16-byte receive framing.
 - `motor_vendor_damiao::protocol`: state/register decoding and feedback, mode-read, enable/disable, POS_VEL/VEL encoding.
-- `motorbridge_backend/`: local, private C ABI glue. It keeps bounded manual polling and per-frame fault/mode latches. It closes the transport by dropping it, without calling an all-motor shutdown or flushing a potentially blocked serial link. It does not encode protocol bytes itself or alter firmware configuration.
+- `motorbridge_backend/`: local, private C ABI glue. It keeps bounded manual polling and per-frame fault/mode latches. It closes the transport by dropping it, without calling an all-motor shutdown or flushing a potentially blocked serial link. It uses upstream protocol encoders. Explicit mode configuration operations write RAM CTRL_MODE only while fresh disabled feedback is available: gripper7 uses mode4; optional arm setup uses its configured POS_VEL/VEL mode. They do not save EEPROM, zero positions, clear faults or enable motors. Arm mode setup is opt-in and disabled by default.
 - `src/damiao_system.cpp`: ROS 2 interfaces/lifecycle, calibration mapping, command validation and ownership.
 - `test/wire_fixture.*`: independent expected command bytes for the PTY emulator only; not part of the installed driver.
 

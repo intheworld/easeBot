@@ -9,7 +9,8 @@ import pytest
 import yaml
 rclpy = pytest.importorskip('rclpy')
 from action_msgs.msg import GoalStatus
-from control_msgs.action import GripperCommand
+from control_msgs.action import FollowJointTrajectory, GripperCommand
+from trajectory_msgs.msg import JointTrajectoryPoint
 from controller_manager_msgs.srv import ListControllers, ListHardwareInterfaces
 from rclpy.action import ActionClient
 from rclpy.context import Context
@@ -18,8 +19,10 @@ from test_shared_gripper import SharedAdapter, gripper_goal
 from test_damiao_stack import ROOT
 
 
-@pytest.mark.parametrize('readonly', [False, True])
-def test_both_grippers_start_and_control_independent_buses(tmp_path, monkeypatch, readonly):
+@pytest.mark.parametrize('readonly,full,activate', [
+    (False, False, True), (True, False, True),
+    (False, True, True), (True, True, True), (False, True, False)])
+def test_both_grippers_start_and_control_independent_buses(tmp_path, monkeypatch, readonly, full, activate):
     domain = 120 + os.getpid() % 30
     monkeypatch.setenv('ROS_DOMAIN_ID', str(domain))
     monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'LOCALHOST')
@@ -28,7 +31,8 @@ def test_both_grippers_start_and_control_independent_buses(tmp_path, monkeypatch
     for side in ('left', 'right'):
         config = yaml.safe_load((ROOT / f'hei_bringup/config/{side}_arm.yaml').read_text())
         adapter = SharedAdapter(config['motors'] + [config['gripper']])
-        adapter.arm_mode = 1
+        adapter.arm_mode = 2 if full else 1
+        adapter.positions[2] = .01201629638671875
         adapters[side] = adapter
         config.update(port=adapter.path, feedback_timeout_ms=500)
         profiles[side] = tmp_path / f'{side}.yaml'
@@ -42,7 +46,8 @@ def test_both_grippers_start_and_control_independent_buses(tmp_path, monkeypatch
     executor = SingleThreadedExecutor(context=context)
     executor.add_node(node)
     log = log_path.open('w')
-    process = subprocess.Popen(['ros2', 'launch', 'hei_bringup', 'grippers.launch.py',
+    process = subprocess.Popen(['ros2', 'launch', 'hei_bringup', 'damiao_arms.launch.py' if full else 'grippers.launch.py',
+        *(['activate_arm:=false'] if not activate else []),
         f'read_only:={str(readonly).lower()}',
         f'namespace:={namespace}',
         *[f'{side}_config_file:={profile}' for side, profile in profiles.items()]],
@@ -76,13 +81,17 @@ def test_both_grippers_start_and_control_independent_buses(tmp_path, monkeypatch
             clients[side] = client
             expected = {f'{side}_joint_state_broadcaster': 'active',
                         f'{side}_gripper_controller': 'inactive' if readonly else 'active'}
+            if full and not readonly:
+                expected[f'{side}_arm_controller'] = 'active' if activate else 'inactive'
             until(lambda: {c.name: c.state for c in call(listing, ListControllers.Request()).controller} == expected)
             until(client.server_is_ready)
             info = call(interfaces, ListHardwareInterfaces.Request())
             assert len(info.state_interfaces) == 23
-            assert len(info.command_interfaces) == (0 if readonly else 4)
-            assert all(i.name.startswith(f'{side}_gripper_motor/') for i in info.command_interfaces)
-            assert not any(adapters[side].enabled.values())
+            assert len(info.command_interfaces) == (0 if readonly else 10 if full else 4)
+            if not full:
+                assert all(i.name.startswith(f'{side}_gripper_motor/') for i in info.command_interfaces)
+            assert all(adapters[side].enabled[i] == (full and activate and not readonly) for i in range(1, 7))
+            assert not adapters[side].enabled[7]
         until(lambda: all(f'/{namespace}/{side}_{topic}' in dict(node.get_topic_names_and_types())
                           for side in adapters for topic in ('tf_static', 'joint_states', 'robot_description')))
         graph = node.get_node_names_and_namespaces()
@@ -100,14 +109,29 @@ def test_both_grippers_start_and_control_independent_buses(tmp_path, monkeypatch
             left = wait(clients['left'].send_goal_async(gripper_goal(.003, 0.0)))
             assert left.accepted
             assert wait(left.get_result_async()).status == GoalStatus.STATUS_SUCCEEDED
-            assert adapters['left'].enabled[7] and not any(adapters['right'].enabled.values())
+            assert adapters['left'].enabled[7] and not adapters['right'].enabled[7]
             # Keep both goals in flight to verify simultaneous control.
             left_future = clients['left'].send_goal_async(gripper_goal(.004, 0.0))
             right_future = clients['right'].send_goal_async(gripper_goal(.005, 0.0))
             handles = [wait(left_future), wait(right_future)]
             assert all(h.accepted for h in handles)
             assert all(wait(h.get_result_async()).status == GoalStatus.STATUS_SUCCEEDED for h in handles)
-            assert all(a.enabled[7] and not any(a.enabled[i] for i in range(1, 7)) for a in adapters.values())
+            assert all(a.enabled[7] for a in adapters.values())
+            assert all(a.enabled[i] == (full and activate) for a in adapters.values() for i in range(1, 7))
+            if full and activate:
+                goals = []
+                for side, prefix in [('left', 'b_left'), ('right', 'a_right')]:
+                    client = ActionClient(node, FollowJointTrajectory, f'/{namespace}/{side}_arm_controller/follow_joint_trajectory')
+                    clients[f'{side}_arm'] = client
+                    until(client.server_is_ready)
+                    goal = FollowJointTrajectory.Goal()
+                    goal.trajectory.joint_names = [f'{prefix}_joint{i}' for i in range(1, 7)]
+                    goal.trajectory.points = [JointTrajectoryPoint(positions=[0.0, -.02, -.5, 0.0, 0.0, 0.0])]
+                    goal.trajectory.points[0].time_from_start.sec = 1
+                    goals.append(client.send_goal_async(goal))
+                handles = [wait(future) for future in goals]
+                assert all(h.accepted for h in handles)
+                assert all(wait(h.get_result_async()).status == GoalStatus.STATUS_SUCCEEDED for h in handles)
             assert abs(adapters['left'].positions[7] - (-.18)) < .001
             assert abs(adapters['right'].positions[7] - (-.225)) < .001
     finally:

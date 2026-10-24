@@ -36,6 +36,7 @@ class UsbCanAdapter:
         self.positions = {i: -0.5 if i in (2, 3) else 0.0 for i in self.motors}
         self.enabled = {i: False for i in self.motors}
         self.torques = {i: 0.0 for i in self.motors}
+        self.modes = {i: 2 for i in self.motors}
         self.frames = []
         self.error = None
         self.stopped = threading.Event()
@@ -67,7 +68,13 @@ class UsbCanAdapter:
             if data[2] == 0xcc:
                 self.status(motor_id)
             elif data[2:4] == b'\x33\x0a':
-                self.reply(self.motors[motor_id], data[:4] + struct.pack('<I', 2))
+                self.reply(self.motors[motor_id], data[:4] + struct.pack('<I', self.modes[motor_id]))
+            elif data[2:4] == b'\x55\x0a':
+                assert not any(self.enabled.values()), 'mode setup must not take over an enabled bus'
+                mode = int.from_bytes(data[4:], 'little')
+                assert mode in (2, 3)
+                self.modes[motor_id] = mode
+                self.reply(self.motors[motor_id], data)
             else:
                 raise AssertionError(f'unexpected parameter operation: {data.hex()}')
         elif can_id in self.motors and data[:7] == b'\xff' * 7:
@@ -114,10 +121,15 @@ class UsbCanAdapter:
         assert not self.thread.is_alive()
 
 
-@pytest.mark.parametrize('readonly', [True, False])
-def test_damiao_plugin_controller_and_readonly_boundary(tmp_path, monkeypatch, readonly):
+@pytest.mark.parametrize('readonly,configure_mode', [(True, False), (False, False), (False, True), (True, True)])
+def test_damiao_plugin_controller_and_readonly_boundary(tmp_path, monkeypatch, readonly, configure_mode):
     config = yaml.safe_load((ROOT / 'hei_bringup/config/right_arm.yaml').read_text())
     adapter = UsbCanAdapter(config['motors'])
+    # Reproduce the real arm: joint2 starts just above the reference upper
+    # bound. Activation, idle hold and a trajectory back inside must all work.
+    adapter.positions[2] = 0.01201629638671875
+    if configure_mode:
+        adapter.modes = {i: 1 for i in adapter.motors}
     config['port'] = adapter.path
     config['feedback_timeout_ms'] = 500
     profile = tmp_path / 'arm.yaml'
@@ -126,7 +138,7 @@ def test_damiao_plugin_controller_and_readonly_boundary(tmp_path, monkeypatch, r
     monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'LOCALHOST')
     monkeypatch.delenv('ROS_LOCALHOST_ONLY', raising=False)
     env = dict(os.environ, ROS_LOG_DIR=str(tmp_path / 'ros-log'))
-    namespace = f'hei_damiao_test_{os.getpid()}_{int(readonly)}'
+    namespace = f'hei_damiao_test_{os.getpid()}_{int(readonly)}_{int(configure_mode)}'
     context = Context()
     rclpy.init(context=context, domain_id=int(os.environ['ROS_DOMAIN_ID']))
     node = rclpy.create_node('damiao_acceptance', context=context)
@@ -139,8 +151,8 @@ def test_damiao_plugin_controller_and_readonly_boundary(tmp_path, monkeypatch, r
     try:
         with log_path.open('w+') as log:
             launch = subprocess.Popen(
-                ['ros2', 'launch', 'hei_bringup', 'damiao_arm.launch.py',
-                 'include_gripper:=false', f'config_file:={profile}', f'read_only:={str(readonly).lower()}', f'namespace:={namespace}'],
+                ['ros2', 'launch', 'hei_bringup', 'damiao_arm.launch.py', 'activate_arm:=false',
+                 'include_gripper:=false', f'configure_control_mode:={str(configure_mode).lower()}', f'config_file:={profile}', f'read_only:={str(readonly).lower()}', f'namespace:={namespace}'],
                 stdout=log, stderr=log, env=env, start_new_session=True)
 
             def until(condition, timeout=20):
@@ -183,6 +195,7 @@ def test_damiao_plugin_controller_and_readonly_boundary(tmp_path, monkeypatch, r
             else:
                 assert current['right_arm_controller'] == 'inactive'
             assert not any(can_id != 0x7ff for can_id, _ in adapter.frames), 'startup sent motor commands'
+            assert set(adapter.modes.values()) == ({1} if readonly and configure_mode else {2})
             if not readonly:
                 switching = node.create_client(SwitchController, f'/{namespace}/controller_manager/switch_controller')
                 request = SwitchController.Request()
@@ -191,6 +204,10 @@ def test_damiao_plugin_controller_and_readonly_boundary(tmp_path, monkeypatch, r
                 request.timeout.sec = 3
                 assert call(switching, request).ok
                 until(lambda: all(adapter.enabled.values()))
+                deadline = time.monotonic() + .25
+                while time.monotonic() < deadline:
+                    executor.spin_once(timeout_sec=.02)
+                assert controllers()['right_arm_controller'] == 'active'
                 action = ActionClient(node, FollowJointTrajectory, f'/{namespace}/right_arm_controller/follow_joint_trajectory')
                 until(action.server_is_ready)
                 goal = FollowJointTrajectory.Goal()

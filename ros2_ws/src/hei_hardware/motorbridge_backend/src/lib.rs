@@ -388,6 +388,39 @@ pub unsafe extern "C" fn hei_mb_configure_gripper(ptr: *mut HeiMotorbridge, inde
     })
 }
 #[no_mangle]
+pub unsafe extern "C" fn hei_mb_configure_arm_mode(ptr: *mut HeiMotorbridge, index: u32) -> i32 {
+    ffi(|| {
+        let s = session(ptr)?;
+        let m = s
+            .motors
+            .get_mut(index as usize)
+            .ok_or("invalid motor index")?;
+        if ![2, 3].contains(&m.expected_mode)
+            || ![1, 2, 3].contains(&m.state.mode)
+            || m.state.status != 0
+            || m.state.fault_status != 0
+            || age(m.received) > 250_000_000
+            || age(m.mode_received) > 250_000_000
+        {
+            return Err("arm mode configuration requires fresh disabled, fault-free state and mode feedback".into());
+        }
+        if m.state.mode == m.expected_mode {
+            m.state.mode_changed = 0;
+            return Ok(());
+        }
+        let id = m.id;
+        let mode = m.expected_mode as u32;
+        // Configure RAM only. No enable, zeroing, fault-clear or EEPROM-save command.
+        m.state.mode = -1;
+        m.state.mode_changed = 0;
+        m.mode_received = None;
+        s.send(
+            0x7ff,
+            dm::encode_register_write_cmd(id, 10, mode.to_le_bytes()),
+        )
+    })
+}
+#[no_mangle]
 pub unsafe extern "C" fn hei_mb_force_position(
     ptr: *mut HeiMotorbridge,
     index: u32,

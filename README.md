@@ -79,7 +79,15 @@ RViz 配置默认使用 `/hei/robot_description`；自定义 namespace 时需在
 ros2 launch hei_bringup damiao_arm.launch.py arm:=right
 ```
 
-可控制入口使用 `read_only:=false`，两个控制器初始均为 inactive；六轴需事先核对 POS_VEL 模式、零位和限位，夹爪使用 Torque_Pos。整臂与夹爪分别激活、停止，不再需要两个节点争用串口。
+双臂统一入口（默认可写、自动激活双臂和夹爪控制器）：
+
+```bash
+ros2 launch hei_bringup damiao_arms.launch.py configure_control_mode:=true
+```
+
+默认 `activate_arm:=true`：双臂六轴自动使能并以实测位置初始化保持目标；`activate_arm:=false` 只配置机械臂控制器，`read_only:=true` 完全只读且不加载机械臂控制器。两侧管理器为 `/hei/left_controller_manager`、`/hei/right_controller_manager`；轨迹 Action 为 `/hei/left_arm_controller/follow_joint_trajectory`、`/hei/right_arm_controller/follow_joint_trajectory`。夹爪控制器自动激活，收到有效目标才使能 motor7，默认位置调试 `max_effort: 0`。可传 `include_gripper:=false` 仅启动双臂。
+
+`configure_control_mode` 默认 false；显式 true 在失能状态设置并回读 RAM POS_VEL，不保存 EEPROM。单侧入口 `damiao_arm.launch.py arm:=right read_only:=false` 同样默认自动激活机械臂，夹爪默认 inactive。
 
 | 接口 | 类型 |
 | --- | --- |

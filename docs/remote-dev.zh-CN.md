@@ -362,3 +362,19 @@ HEI_TEST_REAL_CAMERAS=1 python3 -m pytest -q -s tests/test_robot_cameras.py
 已删除旧 `gripper.launch.py`，并清理本机、机器人源码及 install 中的对应文件和缓存。单侧夹爪诊断需要时使用基础入口的 `arm_read_only:=true activate_gripper:=true gripper_position_only:=true read_only:=false`，不再维护额外包装入口。
 
 本机与机器人均通过 **23 项相关回归**，覆盖双侧并发、公共 namespace 内节点名称唯一、描述/状态/TF 话题隔离、只读无写入、串口冲突拒绝、单侧正式控制入口和夹爪保护。日志为 `ros2_ws/log/unify-gripper-namespace-tests-{local,robot}.log`。全部使用虚拟串口，未发送真机目标；需退出旧 launch 后重新运行 `ros2 launch hei_bringup grippers.launch.py`。
+
+
+### 六轴启动模式配置选项与右臂启动验证（2026-10-23）
+
+真实右臂可写启动失败原因为 `a_right_joint1: CTRL_MODE mismatch`；当时串口空闲，未进入限位或轨迹激活阶段。新增 `configure_control_mode:=true`，默认关闭。开启后，仅在所有可写资源均有新鲜、失能、无故障及已知模式反馈时，配置六轴 RAM CTRL_MODE 到命令接口所需 POS_VEL=2（或速度接口 VEL=3），回读正确后继续启动。不保存 EEPROM、不使能、不改零位、不清故障；只读/state-only 电机不写模式，运行中的模式异常仍锁存故障。错误日志增加 actual/expected。入口命令见 [硬件说明](../ros2_ws/src/hei_hardware/README.md)。
+
+本机和机器人均通过 **25 项相关 ROS 回归、16 项 C++ 驱动测试**。新增用例覆盖 MIT=1 失能状态切到 POS_VEL=2、回读失败拒绝启动、拒绝已使能电机、只读时即使设置选项也不写模式。日志为 `ros2_ws/log/arm-mode-setup-{build,cpp,tests}-{local,robot}.log`。
+
+随后在串口空闲时，以临时 namespace 和 `include_gripper:=false configure_control_mode:=true read_only:=false` 完成右臂真实启动验证，六轴 RAM 模式从 1 切到 2，`right_arm_controller` 保持 inactive，只有状态广播器 active；未激活轨迹控制器、未发送目标，验证进程已退出。退出后只读回查六轴均 mode=2、status=0、fault=0，位置与此前只读记录一致。日志 `arm-mode-setup-real-startup.log` 与 `arm-mode-setup-real-disabled.json`。没有保存 EEPROM、写零位或操作左臂/夹爪。
+
+右臂 joint2 当时为 +0.012016 rad，高于参考目标上限 0。后续已移除因此拒绝六轴激活的检查：以实测位置初始化保持目标，新目标仍受配置范围约束。
+
+
+### 2026-10-23：修复激活后通用限位器异常
+
+仅去掉硬件插件的激活检查仍不够：controller_manager 的通用限位器会因 joint2 实测 +0.012016 rad 超过 URDF 参考上限而在首次更新时抛异常，控制器进入 unconfigured，Action 接口却仍可能接受目标。Damiao 专用启动入口现关闭该通用限位器，硬件适配器继续检查目标范围、通信和电机故障；允许从范围外启动位置保持并插值回范围内，不允许继续扩大越界。变更需要重启 launch，发送目标前应确认机械臂控制器为 active。虚拟串口集成回归使用 joint2=+0.012016 rad 验证激活、保持、轨迹结果及停止。

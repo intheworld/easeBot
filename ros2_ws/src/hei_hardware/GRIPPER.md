@@ -33,7 +33,7 @@ ros2 launch hei_bringup damiao_arm.launch.py arm:=right read_only:=false
 ros2 control list_controllers -c /hei/controller_manager
 ```
 
-两个控制器初始 inactive。六轴要求 POS_VEL=2；motor7 在新鲜失能反馈下设置/回读 RAM Torque_Pos=4，不保存 EEPROM、不改零位。此前真机记录中六轴为 MIT=1，joint2 高于参考上限，这些问题解决前不能激活整臂控制器。
+单侧机械臂控制器默认自动 active（`activate_arm:=false` 可关闭），夹爪控制器默认 inactive。六轴要求 POS_VEL=2；若仍为 MIT=1，可显式使用 `configure_control_mode:=true` 在新鲜失能反馈下临时设置并回读模式，不使能、不保存 EEPROM。默认不自动切换。motor7 在新鲜失能反馈下设置/回读 RAM Torque_Pos=4，不保存 EEPROM、不改零位。六轴激活仍检查模式、反馈和故障状态；不因当前位置超出参考目标范围拒绝激活。夹爪的位置/力矩保护保留。
 
 现场确认后同时激活（机械臂控制器激活会使能六轴）：
 
@@ -144,3 +144,5 @@ python3 -m pytest -q tests/test_shared_gripper.py
 左右真实夹爪配置按 DM-J4310-2EC V1.1：额定输出力矩 3 N·m、峰值 7 N·m。本工程将额定值作为软件反馈停机阈值，在对应 `*_arm.yaml` 的 `gripper.torque_limit_nm: 3.0` 显式配置，并通过 Xacro 传给硬件插件；这不是厂家规定的统一停机阈值，也不代表已完成夹爪机构承载验收。型号/版本不同需使用对应参数。参考 [官方 V1.1 产品页](https://www.damiaokeji.com/index.php?c=show&id=84)。
 
 原先隐藏的 0.5 N·m 缺省值与 1 N·m 配置上限已移除；缺少阈值会拒绝可写配置。阈值必须为正且不超过配置的力矩协议量程。`t_max: 10` 仍是协议量程，不能改为额定力矩；5% 电流限制与该软件阈值分别执行，均不表示夹持力的牛顿标定。反馈超出该阈值时仍按共享硬件故障停用控制器，日志记录实际值。
+
+双臂和双夹爪一起使用 `ros2 launch hei_bringup damiao_arms.launch.py configure_control_mode:=true`，四个运动控制器默认自动 active；夹爪仍收到目标才使能。

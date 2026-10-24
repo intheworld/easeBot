@@ -47,6 +47,7 @@ private:
     double direction{1}, offset{0}, gear{1}, speed{0};
     double minimum{0}, maximum{0};
     double position{NaN}, velocity{NaN}, effort{NaN}, command{NaN};
+    double startup_hold{NaN};
     uint8_t status{0};
     uint8_t fault_status{0};
     int mode{-1};
@@ -70,6 +71,7 @@ private:
   HeiMotorbridge * backend_{nullptr};
   std::string device_;
   unsigned baud_{921600};
+  bool configure_control_mode_{false};
   bool read_only_{true}, configured_{false}, active_{false}, faulted_{false};
   std::chrono::milliseconds feedback_timeout_{250}, configure_timeout_{2000};
 };

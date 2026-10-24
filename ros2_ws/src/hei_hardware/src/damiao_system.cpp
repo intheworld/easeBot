@@ -65,6 +65,11 @@ Callback DamiaoSystem::on_init(const hardware_interface::HardwareComponentInterf
     const auto readonly = optional(p, "read_only", "true");
     if (readonly != "true" && readonly != "false") { throw std::invalid_argument("read_only must be true or false"); }
     read_only_ = readonly == "true";
+    const auto configure_mode = optional(p, "configure_control_mode", "false");
+    if (configure_mode != "true" && configure_mode != "false") {
+      throw std::invalid_argument("configure_control_mode must be true or false");
+    }
+    configure_control_mode_ = configure_mode == "true";
     baud_ = integer(optional(p, "baud", "921600"), 115200, 921600);
     if (baud_ != 115200 && baud_ != 921600) { throw std::invalid_argument("unsupported serial baud"); }
     feedback_timeout_ = std::chrono::milliseconds(integer(optional(p, "feedback_timeout_ms", "250"), 20, 2000));
@@ -272,6 +277,11 @@ Callback DamiaoSystem::on_configure(const rclcpp_lifecycle::State &)
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       receive();
       bool ready = true;
+      // Do not write any arm mode until every writable resource is freshly disabled.
+      const bool all_disabled = std::all_of(motors_.begin(), motors_.end(), [this](const auto & motor) {
+        return motor.read_only || (fresh(motor) && motor.status == 0 && motor.fault_status <= 1 &&
+          motor.mode != -1 && Clock::now() - motor.mode_received <= feedback_timeout_);
+      });
       for (const auto & m : motors_) {
         ready &= fresh(m);
         if (fresh(m) && m.fault_status > 1) { throw std::runtime_error(m.name + ": motor fault " + std::to_string(m.fault_status)); }
@@ -285,7 +295,19 @@ Callback DamiaoSystem::on_configure(const rclcpp_lifecycle::State &)
             ready = false;
             continue;
           }
-          if (m.mode_changed || (m.mode != -1 && m.mode != expected)) { throw std::runtime_error(m.name + ": CTRL_MODE mismatch; configure firmware before connecting"); }
+          if (!m.gripper && configure_control_mode_ &&
+            (m.mode_changed || (m.mode != -1 && m.mode != expected))) {
+            if (all_disabled) {
+              RCLCPP_INFO(logger, "%s: configuring RAM CTRL_MODE %d -> %d while disabled", m.name.c_str(), m.mode, expected);
+              check(hei_mb_configure_arm_mode(backend_, m.index));
+            }
+            ready = false;
+            continue;
+          }
+          if (m.mode_changed || (m.mode != -1 && m.mode != expected)) {
+            throw std::runtime_error(m.name + ": CTRL_MODE mismatch: actual=" + std::to_string(m.mode) +
+              ", expected=" + std::to_string(expected) + "; use configure_control_mode:=true for disabled arm setup");
+          }
         }
       }
       if (ready) { configured_ = true; return Callback::SUCCESS; }
@@ -407,13 +429,22 @@ Result DamiaoSystem::write(const rclcpp::Time &, const rclcpp::Duration &)
   if (read_only_ || !active_) { return Result::OK; }
   try {
     // Validate the entire batch before sending any movement command.
-    for (const auto & m : motors_) {
+    for (auto & m : motors_) {
       if (!m.claimed) { continue; }
+      const bool outside = m.command < m.minimum || m.command > m.maximum;
+      // An arm may start outside the reference command range. Preserve its
+      // measured hold target and allow interpolation back into the range,
+      // without allowing targets farther outside. Retire this on entry.
+      const bool startup_hold = !m.gripper && m.command_interface == "position" &&
+        std::isfinite(m.startup_hold) &&
+        m.command >= std::min(m.minimum, m.startup_hold) &&
+        m.command <= std::max(m.maximum, m.startup_hold);
       if (!fresh(m) || m.mode_changed || Clock::now() - m.mode_received > feedback_timeout_ ||
         m.mode != m.expected_mode ||
-        !std::isfinite(m.command) || m.command < m.minimum || m.command > m.maximum) {
+        !std::isfinite(m.command) || (outside && !startup_hold)) {
         return fail(m.name + ": stale feedback or invalid/out-of-limit command");
       }
+      if (!outside) { m.startup_hold = NaN; }
       if (m.gripper && (!std::isfinite(m.speed_command) || m.speed_command < 0.01 || m.speed_command > m.speed ||
         !std::isfinite(m.current_command) || m.current_command < 0.0001 || m.current_command > m.current_limit ||
         (m.enable_command != 0 && m.enable_command != 1))) {
@@ -483,8 +514,8 @@ Result DamiaoSystem::perform_command_mode_switch(
       if (!active_ || !fresh(m) || m.mode_changed || m.fault_status > 1 || m.status != (m.owned ? 1 : 0) ||
         m.mode != m.expected_mode ||
         Clock::now() - m.mode_received > feedback_timeout_ ||
-        (m.command_interface == "position" &&
-          (m.position < m.minimum - (m.gripper ? 0.000383 : 0) || m.position > m.maximum + (m.gripper ? 0.000383 : 0)))) {
+        (m.gripper &&
+          (m.position < m.minimum - 0.000383 || m.position > m.maximum + 0.000383))) {
         return fail(m.name + ": motor is not ready to be claimed");
       }
     }
@@ -492,6 +523,7 @@ Result DamiaoSystem::perform_command_mode_switch(
       const auto key = m.name + "/" + m.command_interface;
       if (std::find(start.begin(), start.end(), key) == start.end()) { continue; }
       m.command = m.command_interface == "position" ? m.position : 0;
+      m.startup_hold = !m.gripper && m.command_interface == "position" ? m.position : NaN;
       if (m.gripper) {
         m.command = std::clamp(m.position, m.minimum, m.maximum);
         m.enable_command = 0;

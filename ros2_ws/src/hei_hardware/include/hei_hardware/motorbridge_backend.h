@@ -26,6 +26,8 @@ int hei_mb_command(HeiMotorbridge *, uint32_t index, double value, double speed,
 // Explicit gripper7 operations; configure requires disabled feedback and only writes RAM CTRL_MODE=4.
 int hei_mb_read_mode(HeiMotorbridge *, uint32_t index);
 int hei_mb_configure_gripper(HeiMotorbridge *, uint32_t index);
+// Optional arm setup: expected POS_VEL/VEL mode in RAM, fresh disabled feedback required.
+int hei_mb_configure_arm_mode(HeiMotorbridge *, uint32_t index);
 int hei_mb_force_position(HeiMotorbridge *, uint32_t index, double position, double speed, double current_ratio);
 #ifdef __cplusplus
 }
