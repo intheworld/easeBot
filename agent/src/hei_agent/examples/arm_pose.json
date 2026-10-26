@@ -1,0 +1,62 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "read_right_tcp_pose",
+  "entry": "pose",
+  "max_steps": 2,
+  "timeout_sec": 10,
+  "nodes": [
+    {
+      "id": "pose",
+      "kind": "skill",
+      "inputs": {
+        "skill": "get_arm_pose",
+        "arguments": {
+          "side": "right",
+          "frame_id": "a_right_base_link"
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "outputs": {
+          "frame_id": {
+            "$ref": "nodes.pose.frame_id"
+          },
+          "tool_frame": {
+            "$ref": "nodes.pose.tool_frame"
+          },
+          "x_m": {
+            "$ref": "nodes.pose.x_m"
+          },
+          "y_m": {
+            "$ref": "nodes.pose.y_m"
+          },
+          "z_m": {
+            "$ref": "nodes.pose.z_m"
+          },
+          "qx": {
+            "$ref": "nodes.pose.qx"
+          },
+          "qy": {
+            "$ref": "nodes.pose.qy"
+          },
+          "qz": {
+            "$ref": "nodes.pose.qz"
+          },
+          "qw": {
+            "$ref": "nodes.pose.qw"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "pose",
+      "target": "done"
+    }
+  ]
+}

@@ -1,16 +1,18 @@
 """MHS SDK is touched only from the asyncio thread."""
 import asyncio
 
-from agnes_mhs import Device, errors
+from agnes_mhs import errors
+
+from .discovery import DiscoveryDevice as Device
 
 from .cache import CAMERAS
 
 
 class ObserverDevice:
-    def __init__(self, cache, device_id):
+    def __init__(self, cache, device_id, *, device=None):
         self.cache = cache
         # This represents a logical read-only observer, not a motion-capable robot.
-        self.device = Device(device_id, 'sensor', name='HEI ReBot Lift read-only observer',
+        self.device = device if device is not None else Device(device_id, 'sensor', name='HEI ReBot Lift read-only observer',
                              model='HEI ROS 2 observer', mobile=False, localization='none',
                              state={
                                  'mode': {'type': 'string'}, 'backend': {'type': 'string'},
@@ -43,11 +45,14 @@ class ObserverDevice:
         # controllers commanded independently by keyboard/ROS action clients.
         pass
 
+    def snapshot(self):
+        return self.cache.snapshot()
+
     def refresh(self):
-        snapshot = self.cache.snapshot()
+        snapshot = self.snapshot()
         self.device.update(mode=snapshot['mode'], backend=snapshot['backend'], valid=snapshot['valid'],
-                           enabled=snapshot['enabled'], read_only=True, sample_id=snapshot['sample_id'],
-                           stop_scope='observer_only_no_robot_motion_control')
+                           enabled=snapshot['enabled'], read_only=snapshot['read_only'], sample_id=snapshot['sample_id'],
+                           stop_scope=snapshot.get('stop_scope', 'observer_only_no_robot_motion_control'))
         self.device.problem = snapshot['fault'] or (None if snapshot['valid'] else 'ROS feedback missing or stale')
         if self.telemetry.wants():
             self.telemetry.send({'valid': snapshot['valid'], 'sample_id': snapshot['sample_id']})

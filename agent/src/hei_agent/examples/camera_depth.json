@@ -1,0 +1,24 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "front_depth_observation",
+  "entry": "capture",
+  "max_steps": 6,
+  "timeout_sec": 15,
+  "nodes": [
+    {"id": "capture", "kind": "skill", "inputs": {"skill": "get_camera_observation", "arguments": {"camera": "front"}}},
+    {"id": "has_depth", "kind": "branch", "inputs": {"condition": {"$ref": "nodes.capture.depth_available"}}},
+    {"id": "point", "kind": "skill", "inputs": {"skill": "sample_depth_point", "arguments": {"observation_id": {"$ref": "nodes.capture.observation_id"}, "u": 0.5, "v": 0.5}}},
+    {"id": "done", "kind": "end", "inputs": {"status": "succeeded", "outputs": {"rgb": {"$ref": "nodes.capture.rgb_ref"}, "depth": {"$ref": "nodes.capture.depth_ref"}, "metadata": {"$ref": "nodes.capture.metadata_ref"}, "z_m": {"$ref": "nodes.point.z_m"}, "frame_id": {"$ref": "nodes.point.frame_id"}, "simulated": {"$ref": "nodes.point.simulated"}}}},
+    {"id": "failed", "kind": "end", "inputs": {"status": "failed", "message": "RGB-D observation or calibrated depth query unavailable"}}
+  ],
+  "edges": [
+    {"source": "capture", "target": "has_depth"},
+    {"source": "capture", "target": "failed", "on": "failure"},
+    {"source": "capture", "target": "failed", "on": "error"},
+    {"source": "has_depth", "target": "point", "on": "true"},
+    {"source": "has_depth", "target": "failed", "on": "false"},
+    {"source": "point", "target": "done"},
+    {"source": "point", "target": "failed", "on": "failure"},
+    {"source": "point", "target": "failed", "on": "error"}
+  ]
+}

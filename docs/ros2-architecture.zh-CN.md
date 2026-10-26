@@ -1,6 +1,14 @@
 # HEI ReBot Lift ROS 2 本地系统架构
 
-日期：2026 年 10 月 19 日。当前主线采用 ROS 2 原生软件栈；此前非 ROS 的 Python 原型、配置、测试与入口已清理，所有运行代码统一位于 `ros2_ws/src`。用户已确认 Web 仅作只读监控。
+本文描述机器人侧 ROS 2 软件栈，其源码位于 `ros2_ws/src`。用户已确认 Web 仅作只读监控。
+服务器侧策略执行器是独立的 [agent Python 项目](../agent/README.md)，不属于 ROS 包，
+通过 pip 安装。机器人侧 `hei_agent_bridge` 是 ROS 与 MHS 的适配边界；默认只读，
+可通过独立 `agent_skills.launch.py` 显式启动 skill set。服务器可发现其版本化目录并调用
+状态、命名位姿和夹爪技能；默认技能配置为 mock，真实点位需单独提供。
+Agent 可用 `--backend embedded --serve` 常驻运行内置 Hub，发布进程内 mDNS/DNS-SD；
+机器人默认 `hub_url=auto`，按可选 hub_id 与设备 ID 自动发现后注册。双方复用
+`packages/hei-discovery`，不依赖 Avahi/D-Bus。图执行与 Hub 生命周期独立，断线恢复连接
+但不重放运动；显式 hub_url 可绕过发现。细节见 [Agent 文档](../agent/README.md#使用机器人发布的-skill-set)。
 
 ## 架构
 
@@ -40,7 +48,7 @@ flowchart TB
 | hei_robot_manager | ListControllers/SwitchController 管理、显式启停、陈旧反馈时请求停用、diagnostics | Python 原生 ROS 节点 |
 | hei_sensors | 三路模拟或 OpenCV 相机、Image/CompressedImage、逐相机诊断 | LifecycleNode；模拟和转换流程已联调，真实相机未连接验证 |
 | hei_monitor | JointState、Odometry、图像和 diagnostics 订阅及只读 HTTP | Rust/rclrs + Axum；无控制 publisher/client |
-| hei_agent_bridge | 将 ROS 状态和 JPEG 适配为 Agnes MHS/MOS 设备 | 可选只读 observer，无机器人控制接口 |
+| hei_agent_bridge | ROS 状态、JPEG 与显式启用的本地 skill set | 默认只读；可独立接入 ROS actions，见技能 README |
 | hei_bringup | robot_state_publisher、controller_manager、spawner 和本地节点统一启动 | 默认 motion inactive；关键节点退出时结束 launch |
 
 默认整机入口使用 `mock_components/GenericSystem`，验证 ROS 2 接口管线。[官方 mock 说明](https://control.ros.org/jazzy/doc/ros2_control/hardware_interface/doc/mock_components_userdoc.html)

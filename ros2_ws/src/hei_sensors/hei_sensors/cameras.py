@@ -10,7 +10,7 @@ from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.qos import qos_profile_sensor_data
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from sensor_msgs.msg import Image, CompressedImage
+from sensor_msgs.msg import CameraInfo, Image, CompressedImage
 
 NAMES = ('front', 'left_wrist', 'right_wrist')
 
@@ -32,6 +32,8 @@ class Cameras(LifecycleNode):
         self.declare_parameter('backend', 'mock')
         self.declare_parameter('fps', 10.0)
         self.declare_parameter('capture_api', 'auto')
+        self.declare_parameter('front_backend', 'opencv')
+        self.declare_parameter('front_serial', '')
         for name in NAMES:
             self.declare_parameter(name + '_device', f'/dev/hei_{name}_camera')
             self.declare_parameter(name + '_fourcc', '')
@@ -49,6 +51,7 @@ class Cameras(LifecycleNode):
         self.sequence = {n: 0 for n in NAMES}
         self.raw = {}
         self.compressed = {}
+        self.depth_pub = self.info_pub = None
         self.captures = {}
         self.workers = []
         self.publish_timer = None
@@ -59,7 +62,7 @@ class Cameras(LifecycleNode):
         self.diag_timer = self.create_timer(0.5, self.diagnostics)
 
     def check_parameters(self, parameters):
-        configuration = {'backend', 'fps', 'capture_api'} | {
+        configuration = {'backend', 'fps', 'capture_api', 'front_backend', 'front_serial'} | {
             n + suffix for n in NAMES for suffix in ('_device', '_fourcc')}
         if self.configured and any(p.name in configuration for p in parameters):
             return SetParametersResult(successful=False, reason='cleanup before changing camera configuration')
@@ -71,11 +74,18 @@ class Cameras(LifecycleNode):
             self.fps = float(self.get_parameter('fps').value)
             if self.backend not in ('mock', 'opencv') or not 1 <= self.fps <= 30:
                 raise ValueError('backend must be mock/opencv; fps must be [1,30]')
+            front_backend = self.get_parameter('front_backend').value
+            if front_backend not in ('opencv', 'realsense'):
+                raise ValueError('front_backend must be opencv/realsense')
             if self.backend == 'opencv':
                 api = self.get_parameter('capture_api').value
                 if api not in ('auto', 'v4l2'):
                     raise ValueError('capture_api must be auto/v4l2')
                 for name in NAMES:
+                    if name == 'front' and front_backend == 'realsense':
+                        from .realsense import RealSenseCapture
+                        self.captures[name] = RealSenseCapture(self.get_parameter('front_serial').value)
+                        continue
                     device = str(self.get_parameter(name + '_device').value)
                     device = int(device) if device.isdecimal() else device
                     cap = cv2.VideoCapture(device, cv2.CAP_V4L2) if api == 'v4l2' else cv2.VideoCapture(device)
@@ -96,6 +106,10 @@ class Cameras(LifecycleNode):
                     Image, f'cameras/{name}/image_raw', qos_profile_sensor_data)
                 self.compressed[name] = self.create_lifecycle_publisher(
                     CompressedImage, f'cameras/{name}/image_raw/compressed', qos_profile_sensor_data)
+            self.depth_pub = self.create_lifecycle_publisher(
+                Image, 'cameras/front/aligned_depth_to_color/image_raw', qos_profile_sensor_data)
+            self.info_pub = self.create_lifecycle_publisher(
+                CameraInfo, 'cameras/front/camera_info', qos_profile_sensor_data)
             self.publish_timer = self.create_timer(1 / self.fps, self.publish)
             self.publish_timer.cancel()
             result = super().on_configure(state)
@@ -124,6 +138,9 @@ class Cameras(LifecycleNode):
             self.stopped.clear()
             if self.backend == 'opencv':
                 for name in NAMES:
+                    start = getattr(self.captures[name], 'start', None)
+                    if start is not None:
+                        start()
                     worker = threading.Thread(target=self.capture, args=(name,), daemon=True)
                     worker.start()
                     self.workers.append(worker)
@@ -183,6 +200,10 @@ class Cameras(LifecycleNode):
 
     def _stop_workers(self):
         self.stopped.set()
+        for cap in self.captures.values():
+            request_stop = getattr(cap, 'request_stop', None)
+            if request_stop is not None:
+                request_stop()
         deadline = time.monotonic() + self.WORKER_JOIN_TIMEOUT
         for worker in self.workers:
             worker.join(timeout=max(0.0, deadline - time.monotonic()))
@@ -190,6 +211,14 @@ class Cameras(LifecycleNode):
         if self.workers:
             self.get_logger().error('Capture worker did not stop; refusing camera reuse')
             return False
+        for cap in self.captures.values():
+            stop = getattr(cap, 'stop', None)
+            if stop is not None:
+                try:
+                    stop()
+                except Exception as exc:
+                    self.get_logger().error(f'Camera stream did not stop: {exc}')
+                    return False
         return True
 
     def _dispose(self):
@@ -206,6 +235,10 @@ class Cameras(LifecycleNode):
             self.publish_timer = None
         for publisher in list(self.raw.values()) + list(self.compressed.values()):
             self.destroy_lifecycle_publisher(publisher)
+        for publisher in (self.depth_pub, self.info_pub):
+            if publisher is not None:
+                self.destroy_lifecycle_publisher(publisher)
+        self.depth_pub = self.info_pub = None
         self.raw.clear()
         self.compressed.clear()
         self.configured = False
@@ -215,7 +248,12 @@ class Cameras(LifecycleNode):
         cap = self.captures[name]
         try:
             while not self.stopped.is_set():
-                ok, frame = cap.read()
+                rgbd = None
+                if hasattr(cap, 'read_rgbd'):
+                    frame, depth, calibration = cap.read_rgbd()
+                    ok, rgbd = True, (depth, calibration)
+                else:
+                    ok, frame = cap.read()
                 if self.stopped.is_set():
                     break
                 if not ok:
@@ -223,7 +261,7 @@ class Cameras(LifecycleNode):
                 image = cv2.resize(frame, (640, 480))
                 captured_stamp = self.get_clock().now().to_msg()
                 with self.lock:
-                    self.frames[name] = (image, captured_stamp)
+                    self.frames[name] = (image, captured_stamp, rgbd)
                     self.last[name] = time.monotonic()
                     self.errors[name] = ''
                 self.stopped.wait(1 / self.fps)
@@ -236,6 +274,7 @@ class Cameras(LifecycleNode):
         if not self.active:
             return
         for index, name in enumerate(NAMES):
+            rgbd = None
             if self.backend == 'mock':
                 image = np.full((480, 640, 3), (32, 25, 18), dtype=np.uint8)
                 for x in range(0, 640, 40):
@@ -247,6 +286,10 @@ class Cameras(LifecycleNode):
                 cv2.putText(image, name + ' / MOCK', (24, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (230, 230, 230), 1)
                 cv2.putText(image, f'frame {self.sequence[name]} - no camera connected', (24, 450), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
                 stamp = self.get_clock().now().to_msg()
+                if name == 'front':
+                    rgbd = (np.full((480, 640), 1., dtype=np.float32),
+                            {'k': [600., 0., 319.5, 0., 600., 239.5, 0., 0., 1.],
+                             'd': [0.] * 5, 'distortion_model': 'plumb_bob'})
                 with self.lock:
                     self.last[name], self.errors[name] = time.monotonic(), ''
             else:
@@ -255,7 +298,7 @@ class Cameras(LifecycleNode):
                     age = time.monotonic() - self.last[name]
                     if item is None or age > 1 or self.errors[name]:
                         continue
-                    image, stamp = item
+                    image, stamp, rgbd = item
                     self.frames[name] = None  # Never republish an old frame with a new stamp.
             ok, jpeg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if not ok:
@@ -264,7 +307,7 @@ class Cameras(LifecycleNode):
                 continue
             raw = Image()
             raw.header.stamp = stamp
-            raw.header.frame_id = name + '_camera_optical_frame'
+            raw.header.frame_id = ('mock_' if self.backend == 'mock' else '') + name + '_camera_optical_frame'
             raw.height, raw.width = image.shape[:2]
             raw.encoding, raw.is_bigendian, raw.step = 'bgr8', 0, raw.width * 3
             raw.data = image.tobytes()
@@ -276,6 +319,19 @@ class Cameras(LifecycleNode):
             compressed.format = 'bgr8; jpeg compressed bgr8'
             compressed.data = jpeg.tobytes()
             self.compressed[name].publish(compressed)
+            if rgbd is not None:
+                depth, calibration = rgbd
+                depth_msg = Image(header=raw.header, height=depth.shape[0], width=depth.shape[1],
+                                  encoding='32FC1', is_bigendian=0, step=depth.shape[1] * 4,
+                                  data=depth.astype('<f4').tobytes())
+                info = CameraInfo(header=raw.header, height=raw.height, width=raw.width,
+                                  k=calibration['k'], d=calibration['d'],
+                                  distortion_model=calibration['distortion_model'])
+                info.r = [1., 0., 0., 0., 1., 0., 0., 0., 1.]
+                k = calibration['k']
+                info.p = [k[0], 0., k[2], 0., 0., k[4], k[5], 0., 0., 0., 1., 0.]
+                self.depth_pub.publish(depth_msg)
+                self.info_pub.publish(info)
             self.sequence[name] += 1
 
     def diagnostics(self):

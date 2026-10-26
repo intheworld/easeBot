@@ -6,6 +6,9 @@
     fps: 10.0
     capture_api: v4l2
     front_device: /dev/hei_front_camera
+    # D435 owns color+depth through one SDK pipeline; wrists stay OpenCV.
+    front_backend: realsense
+    front_serial: ''
     left_wrist_device: /dev/hei_left_wrist_camera
     right_wrist_device: /dev/hei_right_wrist_camera
     front_fourcc: ''

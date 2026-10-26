@@ -1,0 +1,27 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "mock_named_pose",
+  "entry": "observe",
+  "max_steps": 12,
+  "timeout_sec": 10,
+  "nodes": [
+    {"id": "observe", "kind": "skill", "inputs": {"skill": "get_robot_state", "arguments": {}}},
+    {"id": "ready", "kind": "branch", "inputs": {"condition": {"$ref": "nodes.observe.ready"}}},
+    {"id": "approach", "kind": "skill", "inputs": {"skill": "move_to_named_pose", "arguments": {"side": {"$ref": "inputs.side"}, "pose": "pre_grasp"}}},
+    {"id": "transport", "kind": "skill", "inputs": {"skill": "move_to_named_pose", "arguments": {"side": {"$ref": "inputs.side"}, "pose": "transport"}}},
+    {"id": "done", "kind": "end", "inputs": {"status": "succeeded", "outputs": {"last_pose": {"$ref": "nodes.transport.pose"}}, "message": "Mock policy completed; no robot was commanded"}},
+    {"id": "failed", "kind": "end", "inputs": {"status": "failed", "message": "Robot unavailable or motion failed"}}
+  ],
+  "edges": [
+    {"source": "observe", "target": "ready"},
+    {"source": "observe", "target": "failed", "on": "error"},
+    {"source": "ready", "target": "approach", "on": "true"},
+    {"source": "ready", "target": "failed", "on": "false"},
+    {"source": "approach", "target": "transport"},
+    {"source": "approach", "target": "failed", "on": "failure"},
+    {"source": "approach", "target": "failed", "on": "error"},
+    {"source": "transport", "target": "done"},
+    {"source": "transport", "target": "failed", "on": "failure"},
+    {"source": "transport", "target": "failed", "on": "error"}
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "source": "seeed@seeed.local:/home/seeed/gitdir/rebot_grasp",
+  "base_commit": "0510a08508ad64cc4f987f96e0bf5193172a86a4",
+  "note": "Right grasp implementation and config were untracked working-tree files, not contents of the base commit. Imported 2026-10-25. Serial driver and GUI excluded.",
+  "source_sha256": {
+    "calibration/hei_right_fk.py": "a85e238ac58573f78f1ef18fcd1db86280e1cbda40bdf585db6d634fa48ccf37",
+    "utils/hei_mujoco_validation.py": "3101c8c1cbcc2f9fbb52fc7fbae08ecde45b49ac22151f822388b60499040499",
+    "utils/ordinary_grasp.py": "d63fd0b04df374dfa23d043e0886f71396b5849698171c3db5997a31bbcc6e78",
+    "utils/common_utils.py": "cd99399b3919af5a5f4297305765ae4b268ab6d95c0be1524ebed9263383c9ca",
+    "utils/transforms.py": "4549a022952bd506bb247a66dffdc4a9ef25342436d97b93a322c255c8f0762b",
+    "drivers/robot/hei_right_grasp.py": "a1ea3560cffe5d30cbc1c986d2da54ec4ccef542c9abdca7e724c13ce6e8ef66",
+    "scripts/hei_right_grasp.py": "27b693ff2f1e15f702d1a1cc40433941ae1ac165d71a936f949b57c7ea3f18b4",
+    "config/hei_right_grasp.yaml": "a3f16724c5682c19b21b03b625ae71c3413d95f73243dbd51a1749a10bec5bc6",
+    "config/calibration/realsense_d435/right/eye_to_hand.npz": "c8fe1bbc2565ebf0923be501cc082360127c8ef2252f5f356f77f3527c6439bb",
+    "config/calibration/realsense_d435/right/quality.json": "ac58ecf0869f396436d27ff78a218d710fd7f1d8b7882425ae57d74af8d661fc"
+  },
+  "calibration_quality": {
+    "n_samples": 20,
+    "translation_rms_m": 0.0039173127133139436,
+    "translation_max_m": 0.0068889388385204005,
+    "rotation_rms_deg": 0.4454694346478579,
+    "rotation_max_deg": 0.9028345770461402
+  },
+  "calibration_import": {
+    "imported_on": "2026-10-26",
+    "source": "seeed@seeed.local:/home/seeed/gitdir/rebot_grasp",
+    "source_samples": "output/right_manual_cb476bac13_filtered_20_ddd8e2",
+    "target_file": "right_eye_to_hand.npz",
+    "quality_file": "right_eye_to_hand_quality.json",
+    "mode": "eye_to_hand",
+    "arm": "right",
+    "base_frame": "a_right_base_link",
+    "tool_frame": "a_right_tcp",
+    "translation_units": "m",
+    "source_urdf_sha256": "45da706761b0cc770c5601cd804e0a449bf87a830d380e36aeb417be4d8878d0",
+    "target_urdf_sha256": "96df16777adf83c56e0d84c55bdb2ad48d6548ed6db31ae5419a8e9fbe9d2c81",
+    "right_arm_fk_equivalent": true,
+    "excluded_original_sample_numbers": [
+      1,
+      3,
+      4,
+      5,
+      15,
+      26
+    ],
+    "independent_physical_validation": false
+  }
+}

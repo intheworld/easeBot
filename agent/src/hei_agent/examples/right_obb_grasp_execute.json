@@ -1,0 +1,134 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_obb_grasp_execute",
+  "entry": "capture",
+  "max_steps": 10,
+  "timeout_sec": 600,
+  "nodes": [
+    {
+      "id": "capture",
+      "kind": "skill",
+      "inputs": {
+        "skill": "get_camera_observation",
+        "arguments": {
+          "camera": "front"
+        }
+      }
+    },
+    {
+      "id": "perceive",
+      "kind": "skill",
+      "timeout_sec": 95,
+      "inputs": {
+        "skill": "perceive_grasp_target",
+        "arguments": {
+          "observation_id": {
+            "$ref": "nodes.capture.observation_id"
+          },
+          "target": "blue cube"
+        }
+      }
+    },
+    {
+      "id": "plan",
+      "kind": "skill",
+      "timeout_sec": 185,
+      "inputs": {
+        "skill": "plan_right_grasp_from_object",
+        "arguments": {
+          "object_id": {
+            "$ref": "nodes.perceive.object_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "valid",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.plan.validated"
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "kind": "skill",
+      "timeout_sec": 305,
+      "inputs": {
+        "skill": "execute_right_grasp",
+        "arguments": {
+          "plan_id": {
+            "$ref": "nodes.plan.plan_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Gripper closed at grasp pose; object capture unverified; no lift or return executed",
+        "outputs": {
+          "plan_id": {
+            "$ref": "nodes.plan.plan_id"
+          },
+          "grasp_verified": {
+            "$ref": "nodes.execute.grasp_verified"
+          },
+          "gripper_stalled": {
+            "$ref": "nodes.execute.gripper_stalled"
+          },
+          "object_id": {
+            "$ref": "nodes.perceive.object_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "failed",
+      "kind": "end",
+      "inputs": {
+        "status": "failed",
+        "message": "Grasp collision or scene validation failed; inspect plan_ref",
+        "outputs": {
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          },
+          "validation_status": {
+            "$ref": "nodes.plan.validation_status"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "capture",
+      "target": "perceive"
+    },
+    {
+      "source": "perceive",
+      "target": "plan"
+    },
+    {
+      "source": "plan",
+      "target": "valid"
+    },
+    {
+      "source": "valid",
+      "target": "execute",
+      "on": "true"
+    },
+    {
+      "source": "valid",
+      "target": "failed",
+      "on": "false"
+    },
+    {
+      "source": "execute",
+      "target": "done"
+    }
+  ]
+}

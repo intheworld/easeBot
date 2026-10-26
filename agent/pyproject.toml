@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hei-agent"
+version = "0.1.0"
+description = "HEI server-side Graph-as-Policy task definitions and asynchronous runtime"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+llm = ["openai>=1.0,<3", "httpx[socks]>=0.28.1,<0.29"]
+mhs = ["websockets>=14,<18", "hei-discovery==0.1.0"]
+
+[project.scripts]
+hei-agent = "hei_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hei_agent = ["examples/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "../packages/hei-discovery/src"]

@@ -13,6 +13,9 @@
     goal_timeout_sec: 0.0
     max_timeout_sec: 120.0
     stall_timeout_sec: 1.0
+    # Closing stall succeeds with stalled=true and keeps the configured current cap.
+    # Opening, cancellation and timeout retain the existing stop behavior.
+    allow_stalling: true
     # Full-force control still requires the coefficients below.
     calibrated: true
     # Position reference: hei-rebot-lift b7c45e1, single finger 0..0.05m
@@ -37,6 +40,9 @@
     goal_timeout_sec: 0.0
     max_timeout_sec: 120.0
     stall_timeout_sec: 1.0
+    # Closing stall succeeds with stalled=true and keeps the configured current cap.
+    # Opening, cancellation and timeout retain the existing stop behavior.
+    allow_stalling: true
     # Full-force control still requires the coefficients below.
     calibrated: true
     # Same nominal two-finger position reference as the right side; force unknown.

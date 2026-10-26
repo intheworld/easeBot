@@ -1,6 +1,6 @@
 # easeBot · HEI ReBot Lift ROS 2
 
-机器人本地 ROS 2 软件栈，参考 ROBOTIS AI Worker 的包边界组织。当前实现基于 ROS 2 Jazzy。正式入口 `robot.launch.py` 默认连接真机，启动全部执行器并完成升降回零；本地模拟使用 `mock_robot.launch.py`。
+机器人本地 ROS 2 软件栈与局域网服务器 Agent。ROS 包参考 ROBOTIS AI Worker 的边界组织，当前基于 ROS 2 Jazzy。正式入口 `robot.launch.py` 默认连接真机，启动全部执行器并完成升降回零；本地模拟使用 `mock_robot.launch.py`。
 
 Web 继续只做状态监控。控制通过独立 ROS 2 service、topic 和 action 完成。
 
@@ -14,11 +14,44 @@ ros2_ws/src/
   hei_robot_manager/    控制器启停、反馈检查与 diagnostics
   hei_sensors/          三相机生命周期节点、图像与持续诊断
   hei_monitor/          Rust ROS 节点、状态缓存与 Axum 只读 Web
-  hei_agent_bridge/     ROS 2 → Agnes MHS/MOS 只读状态与图像接入
+  hei_agent_bridge/     ROS 2 ↔ MHS/MOS，默认只读，可独立启用机器人 skill set
   hei_bringup/          统一 launch
 ```
 
-这是原生 ROS 2 链路：`controller_manager → hardware_interface`，`joint_state_broadcaster → joint_states → robot_state_publisher → TF`。旧版非 ROS 原型与入口已清理，源码统一位于 `ros2_ws/src`。
+这是原生 ROS 2 链路：`controller_manager → hardware_interface`，`joint_state_broadcaster → joint_states → robot_state_publisher → TF`。机器人侧 ROS 源码位于 `ros2_ws/src`。
+
+服务器侧 Agent 独立于 ROS 工作区：
+
+```text
+agent/
+  pyproject.toml       标准 Python 打包与命令入口
+  src/hei_agent/       GaP 风格策略图、节点注册与异步执行内核
+  tests/              不依赖 ROS 的执行器测试
+```
+
+物理 Agent 的任务编排见 [hei_agent](agent/README.md)：已提供人工定义的 graph、
+node、结果分支、超时、取消与 JSONL trace，以及 OpenAI 兼容 LLM 的自然语言图生成和校验修正。
+默认运行内存 mock；MHS 模式可发现并调用机器人发布的状态、命名位姿与夹爪开度技能。
+服务器侧用 pip 安装，无需 ROS 或 colcon；机器人侧的
+`hei_agent_bridge` 保持 ROS 包结构。
+
+```bash
+python3 -m venv agent/.venv
+agent/.venv/bin/python -m pip install -e ./agent
+agent/.venv/bin/hei-agent
+```
+
+LLM 模式安装 `pip install -e './agent[llm]'`，配置 `agent/llm.env.example` 中的模型地址、
+模型名和 API Key 后，可执行
+`agent/.venv/bin/hei-agent --task '右臂先到预抓取位再到搬运位'`。
+`--plan-only` 仅生成图；详细配置和生成记录见 [Agent 文档](agent/README.md#接入-llm)。
+
+机器人侧技能入口为 `ros2 launch hei_bringup agent_skills.launch.py`，默认仅模拟技能；
+服务器先 `bash scripts/setup.bash --agent-server`，再用
+`agent/.venv/bin/hei-agent --backend embedded --serve --hub-id lab-agent` 常驻运行；
+机器人加 `hub_id:=lab-agent` 即可自动发现和注册，无需配置服务器 IP 或启动 Avahi。
+服务器终端输入 `{"list_skills":true}` 查看目录，`{"task":"任务描述"}` 提交任务。
+真实 ROS 后端、示教配置与停止语义见 [MVP skill set](ros2_ws/src/hei_agent_bridge/README.md#mvp-skill-set)。
 
 ## 构建与启动
 
@@ -141,14 +174,14 @@ Rust motorbridge 的串口协议适配说明见 [hei_hardware](ros2_ws/src/hei_h
 
 ## Agnes Agent 接入
 
-已增加可选的 `hei_agent_bridge`。第一版仅提供机器人状态查询和三路 JPEG 观测，不接受运动命令；不会改变 Web 只读约定。统一入口 `bash scripts/setup.bash` 默认准备 SDK 依赖，启动终端使用 `source scripts/env/workspace.bash`。
+可选的 `hei_agent_bridge` 默认仅提供机器人状态查询和三路 JPEG 观测；独立的 skill 入口可显式发布和执行技能，不改变 Web 只读约定。统一入口 `bash scripts/setup.bash` 默认准备机器人 SDK 依赖，启动终端使用 `source scripts/env/workspace.bash`。
 
 ```bash
-# 默认连接本机已启用的 AgnesHub；Hub 地址与 Web UI 地址不同
+# 默认自动发现 Hub；此入口仅提供观测
 ros2 launch hei_bringup mock_robot.launch.py agent_bridge:=true \
-  agent_hub_url:=ws://127.0.0.1:4180
+  agent_hub_id:=lab-agent
 # 或在已经运行的机器人栈旁单独启动
-ros2 run hei_agent_bridge agent_bridge --ros-args -p hub_url:=ws://127.0.0.1:4180
+ros2 run hei_agent_bridge agent_bridge --ros-args -p hub_id:=lab-agent
 ```
 
 默认不启用。设备 ID 默认 hei-01，ROS namespace 默认 /hei。它作为逻辑只读 observer 注册；MHS stop 不停止外部 ROS 客户端的运动。安装、数据含义与验证见 [bridge 说明](ros2_ws/src/hei_agent_bridge/README.md)。

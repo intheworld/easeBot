@@ -27,3 +27,7 @@ target/
 deploy/*.local.json
 deploy/*.local.yaml
 deploy/*.local.yml
+
+# Server-side LLM credentials
+agent/.env
+agent/.env.local

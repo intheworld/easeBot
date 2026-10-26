@@ -146,9 +146,22 @@ python3 scripts/remote-dev.py robot build
 
 构建命令优先加载 `/opt/ros/<ros_distro>/setup.bash`；不存在时尝试 `~/ros2_<ros_distro>/install/setup.bash`，以支持独立源码安装。随后加载仓库的 Rust/Agent 环境脚本，并核对实际 ROS_DISTRO。SSH 非交互环境的 PATH 必须包含 colcon、cargo、cargo-ament-build 等工具；不要依赖 `.bashrc` 中只在交互终端执行的配置。编译 stdout/stderr 直接显示，SSH/rsync/构建失败均返回非零退出码。`build` 不隐式同步，始终先执行 `sync`。
 
-构建产物保留在目标机器的 `ros2_ws/{build,install,log}`。即使源码是 Python 包，也需要 colcon 完成安装和入口点更新。这里不使用 `--symlink-install`，但仍是开发工作区，不提供原子发布或版本回滚。同步不是事务，传输失败应重新同步成功后再构建；不要对已加载这份源码的运行进程进行同步或构建。
+ROS 构建产物保留在目标机器的 `ros2_ws/{build,install,log}`。`ros2_ws/src` 中的 Python ROS 包也需要 colcon 完成安装和入口点更新；独立的 `agent/` Python 项目通过 pip 安装，不参加 colcon。这里不使用 `--symlink-install`，但仍是开发工作区，不提供原子发布或版本回滚。同步不是事务，传输失败应重新同步成功后再构建；不要对已加载这份源码的运行进程进行同步或构建。
 
-服务器的 Agnes Hub 不属于本仓库的 colcon 构建；`server sync` 只复制 easeBot。只有决定在服务器上运行这里的 ROS 包时，才需要 ROS 和 `server build`。
+服务器的 Agnes Hub 和 `agent/` 都不属于本仓库的 colcon 构建；`server sync` 只复制 easeBot。只有决定在服务器上运行这里的 ROS 包时，才需要 ROS 和 `server build`。
+
+同步完成后，在服务器的项目根目录安装 Agent，无需 ROS 环境：
+
+```bash
+bash scripts/setup.bash --agent-server
+agent/.venv/bin/hei-agent --backend embedded --serve --hub-id lab-agent
+```
+
+虚拟环境不参与同步；服务器入口会创建并安装 Agent 与共享 `packages/hei-discovery`。
+机器人 `agent_skills.launch.py hub_id:=lab-agent` 自动发现 Hub，无需固定服务器 IP 或 Avahi。
+服务器常驻终端输入 `{"list_skills":true}` 查看目录，默认技能仍为机器人 mock。
+已有外部 Hub 时可用 `--backend mhs --hub-url ... --list-skills`。同步/构建脚本不启动 Hub、
+技能进程或运动任务；详情见 [技能说明](../ros2_ws/src/hei_agent_bridge/README.md#mvp-skill-set)。
 
 ## 手动运行
 

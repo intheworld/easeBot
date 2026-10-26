@@ -88,7 +88,7 @@ def setup_workspace(tmp_path, monkeypatch):
     (repo / 'scripts/env/workspace.bash').write_text(':\n')
     trace = tmp_path / 'steps'
     monkeypatch.setenv('HEI_SETUP_TRACE', str(trace))
-    for name in ('prepare-build-tools.py', 'prepare-rust-ros.py'):
+    for name in ('prepare-build-tools.py', 'prepare-rust-ros.py', 'prepare-sensors.py'):
         (repo / 'scripts/setup' / name).write_text(
             'import os, pathlib, sys\n'
             'name = pathlib.Path(__file__).name\n'
@@ -122,7 +122,7 @@ def test_setup_runs_from_any_directory_and_selects_optional_sdk(tmp_path, monkey
     if skip_agent:
         command.append('--without-agent-bridge')
     subprocess.run(command, cwd=tmp_path, check=True)
-    expected = ['prepare-build-tools.py', 'prepare-rust-ros.py', 'prepare-motorbridge.bash']
+    expected = ['prepare-build-tools.py', 'prepare-rust-ros.py', 'prepare-motorbridge.bash', 'prepare-sensors.py']
     if not skip_agent:
         expected.append('prepare-agent-bridge.sh')
     assert trace.read_text().splitlines() == expected
@@ -149,6 +149,60 @@ def test_setup_stops_at_failed_dependency(tmp_path, monkeypatch):
     monkeypatch.setenv('HEI_SETUP_FAIL', 'prepare-rust-ros.py')
     assert subprocess.run(['bash', str(repo / 'scripts/setup.bash')]).returncode == 9
     assert trace.read_text().splitlines() == ['prepare-build-tools.py', 'prepare-rust-ros.py']
+
+
+def test_server_setup_needs_no_ros_and_installs_both_local_packages(tmp_path, monkeypatch):
+    import subprocess
+    repo, _, trace = setup_workspace(tmp_path, monkeypatch)
+    monkeypatch.delenv('ROS_DISTRO', raising=False)
+    monkeypatch.delenv('AMENT_PREFIX_PATH', raising=False)
+    python = repo / 'agent/.venv/bin/python'
+    python.parent.mkdir(parents=True)
+    python.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$HEI_SETUP_TRACE"\n')
+    python.chmod(0o755)
+    command = ['bash', str(repo / 'scripts/setup.bash'), '--agent-server']
+    subprocess.run(command, cwd=tmp_path, check=True)
+    assert trace.read_text().splitlines() == [
+        '-m', 'pip', 'install', '-e', str(repo / 'packages/hei-discovery'),
+        '-e', str(repo / 'agent') + '[llm,mhs]']
+    trace.unlink()
+    assert subprocess.run(command + ['--without-agent-bridge']).returncode == 2
+    assert not trace.exists()
+
+
+def test_workspace_pins_native_cmake_despite_broken_path_launcher(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    launcher = tmp_path / 'cmake'
+    launcher.write_text('#!/bin/sh\nexit 77\n')
+    launcher.chmod(0o755)
+    monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
+    monkeypatch.setenv('PYTHONNOUSERSITE', '1')
+    monkeypatch.delenv('CMAKE_COMMAND', raising=False)
+    monkeypatch.delenv('CTEST_COMMAND', raising=False)
+    source = 'source "$1/scripts/env/workspace.bash"\n'
+    result = subprocess.run(['bash', '-c', source +
+        'test "$CMAKE_COMMAND" = /usr/bin/cmake && test "$CTEST_COMMAND" = /usr/bin/ctest && "$CMAKE_COMMAND" --version',
+        'test', str(REPO)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    monkeypatch.setenv('CMAKE_COMMAND', str(launcher))
+    result = subprocess.run(['bash', '-c', source + 'test "$CMAKE_COMMAND" = "$2"',
+        'test', str(REPO), str(launcher)])
+    assert result.returncode == 0  # Explicit caller overrides are preserved.
+
+
+def test_camera_sdk_preparation_stays_in_workspace(tmp_path, monkeypatch):
+    module = load_script('prepare_sensors', 'scripts/setup/prepare-sensors.py')
+    monkeypatch.setattr(module, 'ROOT', tmp_path)
+    monkeypatch.setattr(module.sys, 'argv', ['prepare-sensors.py'])
+    monkeypatch.setattr(module.metadata, 'distributions', lambda **kw: [])
+    monkeypatch.setattr(module.shutil, 'which', lambda name: '/usr/bin/uv')
+    calls = []
+    monkeypatch.setattr(module.subprocess, 'run', lambda args, **kw: calls.append((args, kw)))
+    module.main()
+    args, kwargs = calls[0]
+    assert args[args.index('--target') + 1] == str(tmp_path / '.deps/sensors-python')
+    assert args[-1] == 'pyrealsense2==' + module.VERSION and kwargs['check']
 
 
 def test_build_plugin_installer_uses_workspace_and_reuses_existing_tools(tmp_path, monkeypatch):
@@ -220,3 +274,30 @@ def test_sdk_archive_migration_preserves_old_copy_on_failure(tmp_path, monkeypat
         assert (sdk / 'local-copy').read_text() == 'preserve me'
         assert not list((repo / '.deps').glob('agnes-harness-before-setup.*'))
     assert not list((repo / '.deps').glob('agnes-harness.prepare.*'))
+
+
+@pytest.mark.parametrize('layout', ['install/hei_sensors', 'install'])
+def test_camera_launch_resolves_local_sdk_without_fresh_shell(tmp_path, monkeypatch, layout):
+    pytest.importorskip('launch_ros')
+    import runpy
+    launch = runpy.run_path(str(REPO / 'ros2_ws/src/hei_bringup/launch/cameras.launch.py'))
+    sdk = tmp_path / '.deps/sensors-python'
+    sdk.mkdir(parents=True)
+    prefix = tmp_path / 'ros2_ws' / layout
+    prefix.mkdir(parents=True)
+    environment = launch['camera_environment']
+    monkeypatch.setitem(environment.__globals__, 'get_package_prefix', lambda _: str(prefix))
+    monkeypatch.setenv('PYTHONPATH', '/existing/ros/python')
+    assert environment() == {'PYTHONNOUSERSITE':'1', 'PYTHONPATH':str(sdk)+':/existing/ros/python'}
+
+
+def test_arm_compute_check_does_not_require_detector_or_weights(tmp_path, monkeypatch):
+    import sys
+    script=load_script('prepare_grasp_check','scripts/setup/prepare-grasp.py')
+    calls=[]
+    monkeypatch.setattr(sys,'argv',['prepare-grasp.py','--arm-only','--python',sys.executable,
+                                 '--model',str(tmp_path/'missing-model.pt')])
+    monkeypatch.setattr(script.subprocess,'run',lambda command,**kwargs:calls.append(command))
+    script.main()
+    assert len(calls)==1 and 'mujoco' in calls[0][-1] and 'scipy' in calls[0][-1]
+    assert 'ultralytics' not in calls[0][-1]

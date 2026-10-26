@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hei-discovery"
+version = "0.1.0"
+description = "Process-local HEI MHS discovery; no ROS or Avahi dependency"
+requires-python = ">=3.10"
+dependencies = ["zeroconf==0.151.0", "ifaddr==0.2.0"]
+license = {text = "Apache-2.0"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

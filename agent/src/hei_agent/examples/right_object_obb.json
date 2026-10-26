@@ -1,0 +1,86 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_object_obb",
+  "entry": "capture",
+  "max_steps": 4,
+  "timeout_sec": 110,
+  "nodes": [
+    {
+      "id": "capture",
+      "kind": "skill",
+      "inputs": {
+        "skill": "get_camera_observation",
+        "arguments": {
+          "camera": "front"
+        }
+      }
+    },
+    {
+      "id": "perceive",
+      "kind": "skill",
+      "timeout_sec": 95,
+      "inputs": {
+        "skill": "perceive_grasp_target",
+        "arguments": {
+          "observation_id": {
+            "$ref": "nodes.capture.observation_id"
+          },
+          "target": "blue cube"
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Visible-surface OBB perceived; no motion executed",
+        "outputs": {
+          "object_id": {
+            "$ref": "nodes.perceive.object_id"
+          },
+          "obb_ref": {
+            "$ref": "nodes.perceive.obb_ref"
+          },
+          "target": {
+            "$ref": "nodes.perceive.target"
+          },
+          "frame_id": {
+            "$ref": "nodes.perceive.frame_id"
+          },
+          "geometry_scope": {
+            "$ref": "nodes.perceive.geometry_scope"
+          },
+          "x_m": {
+            "$ref": "nodes.perceive.x_m"
+          },
+          "y_m": {
+            "$ref": "nodes.perceive.y_m"
+          },
+          "z_m": {
+            "$ref": "nodes.perceive.z_m"
+          },
+          "size_x_m": {
+            "$ref": "nodes.perceive.size_x_m"
+          },
+          "size_y_m": {
+            "$ref": "nodes.perceive.size_y_m"
+          },
+          "size_z_m": {
+            "$ref": "nodes.perceive.size_z_m"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "capture",
+      "target": "perceive"
+    },
+    {
+      "source": "perceive",
+      "target": "done"
+    }
+  ]
+}

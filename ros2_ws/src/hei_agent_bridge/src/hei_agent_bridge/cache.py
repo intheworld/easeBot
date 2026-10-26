@@ -19,6 +19,7 @@ class Frame:
     stamp: tuple[int, int]
     received: float
     wall_time: float
+    frame_id: str = ''
 
 
 class RobotCache:
@@ -35,6 +36,8 @@ class RobotCache:
         self.frames = {}
         self.base = None
         self.last_base = None
+        from .vision import PerceptionCache
+        self.perception = PerceptionCache(self)
 
     def joints(self, msg):
         stamp = (msg.header.stamp.sec, msg.header.stamp.nanosec)
@@ -79,7 +82,7 @@ class RobotCache:
         image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None or image.shape[0] > 4096 or image.shape[1] > 4096:
             return
-        frame = Frame(data, image.shape[1], image.shape[0], stamp, time.monotonic(), time.time())
+        frame = Frame(data, image.shape[1], image.shape[0], stamp, time.monotonic(), time.time(), msg.header.frame_id)
         with self.lock:
             self.frames[name] = frame
 

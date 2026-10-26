@@ -1,0 +1,49 @@
+{
+  "worker_python": "~/miniconda3/envs/rebotarm/bin/python",
+  "model_path": "~/gitdir/rebot_grasp/models/yoloe-26s-seg.pt",
+  "joint_speed_rad_s": 0.1,
+  "gripper_open_rad": -4.0,
+  "gripper_closed_rad": 0.0,
+  "gap_per_motor_rad_m": -0.022222222222222223,
+  "pregrasp_offset_m": 0.08,
+  "topdown_grip_depth_m": 0.01,
+  "finger_clearance_m": 0.003,
+  "jaw_clearance_m": 0.004,
+  "min_base_z_m": null,
+  "scene": {
+    "table_frame": "base_footprint",
+    "table_top_z_m": 0.8005,
+    "table_center_xy_m": [
+      0.92,
+      0.0
+    ],
+    "table_size_xy_m": [
+      0.96,
+      1.24
+    ],
+    "table_thickness_m": 0.04,
+    "left_joint_rad": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "left_finger_opening_m": 0.0,
+    "lift_joint_m": -0.149365,
+    "clearance_m": 0.0,
+    "table_gripper_clearance_m": -0.001,
+    "collision_exclusions": [
+      {
+        "bodies": [
+          "a_right_link2",
+          "a_right_link4"
+        ],
+        "max_penetration_m": 0.003,
+        "reason": "User confirmed link2/link4 overlap can be ignored after MuJoCo inspection."
+      }
+    ],
+    "scene_confirmed": true
+  }
+}

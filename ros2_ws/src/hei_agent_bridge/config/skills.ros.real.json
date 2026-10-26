@@ -1,0 +1,5 @@
+{
+  "backend": "ros",
+  "named_poses": {},
+  "gripper_max_gap_m": 0.1
+}

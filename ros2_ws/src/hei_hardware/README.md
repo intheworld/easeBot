@@ -175,3 +175,40 @@ ros2 launch hei_bringup damiao_arms.launch.py configure_control_mode:=true
 底盘入口、轮序、VEL 模式和 TwistStamped 命令见 [BASE.md](BASE.md)。
 
 夹爪反馈位置与目标位置范围分开处理：左右夹爪的实测位置超出 [-4.5, 0] rad 不再触发硬件 ERROR，也不阻止控制器占用接口；新目标仍受配置角度范围约束，反馈力矩阈值和通信/模式故障检查保留。
+
+## 电机参数只读导出
+
+先支撑机械臂并停止占用对应串口的控制 launch。`parameter_dump` 使用 motorbridge
+独占打开串口，只发送寄存器读取，不使能/失能、不运动、不写参数或保存 EEPROM。
+读取 motor1..7 的控制模式、版本、增益、带宽、加减速和协议范围，CSV 同时保留小端原始字节；
+超时字段标记为 `timeout`，不把缺失值当作零，存在缺失时退出码为 2。
+
+为避开工作区的 ROS Cargo 补丁配置，可在 `/tmp` 下按绝对路径构建：
+
+```bash
+cd /tmp
+cargo build --offline --locked --manifest-path /path/to/easeBot/ros2_ws/src/hei_hardware/motorbridge_backend/Cargo.toml --example parameter_dump
+/path/to/easeBot/ros2_ws/src/hei_hardware/motorbridge_backend/target/debug/examples/parameter_dump /dev/hei_right_arm > right-parameters.csv
+/path/to/easeBot/ros2_ws/src/hei_hardware/motorbridge_backend/target/debug/examples/parameter_dump /dev/hei_left_arm > left-parameters.csv
+```
+
+反馈 CAN ID 按当前双臂配置使用 `0x10 + motor_id`；不同 ID 映射需要先调整工具。
+寄存器含义和可用性依赖具体型号及固件；导出值不表示允许修改对应字段。
+
+### 对齐 Seeed SDK 的六轴 POS_VEL 增益
+
+`align_arm_gains` 对齐的是 SDK 提交 `40ab6ce58fec3c58cb603efb3f30240d6f5849e4`
+的 `rebotarm_dm.yaml`，不是所有达妙型号的通用推荐值。motor1..3 的
+`KP_ASR/KI_ASR/KP_APR/KI_APR` 为 `0.0125/0.004/150/0.5`，motor4..6 为
+`0.0008/0.002/50/1`。工具要求六轴失能且处于 POS_VEL，先完整备份再写入，
+每项写入后读回，任何失败立即停止并保留备份与已完成项目；不改夹爪、不发送使能、
+运动、模式切换或 EEPROM 保存指令。端口由串口库独占。
+
+```bash
+# 先支撑机械臂并停止对应控制 launch；在 /tmp 构建以避开 ROS Cargo 补丁。
+cargo build --offline --locked --manifest-path /path/to/easeBot/ros2_ws/src/hei_hardware/motorbridge_backend/Cargo.toml --example align_arm_gains
+/path/to/easeBot/ros2_ws/src/hei_hardware/motorbridge_backend/target/debug/examples/align_arm_gains /dev/hei_right_arm right-before.csv --apply-seeedsdk-profile > right-after.csv
+```
+
+备份文件必须不存在；参数仅写入 RAM，掉电后是否恢复由固件持久化行为决定。
+当前 `DamiaoSystem` 不自动下发这些增益，冷启动后可先只读检查，需要时在维护窗口重新应用。

@@ -39,6 +39,7 @@ public:
         {"motor_torque_per_current_ratio_nm", 0}}) { declare_fixed<double>(p.first, p.second); }
       declare_fixed<bool>("calibrated", false);
       declare_fixed<bool>("position_only", false);
+      declare_fixed<bool>("allow_stalling", false);
     } catch (const std::exception & e) {
       RCLCPP_ERROR(get_node()->get_logger(), "%s", e.what());
       return Callback::ERROR;
@@ -65,6 +66,7 @@ public:
     goal_timeout_ = value("goal_timeout_sec");
     calibrated_ = node->get_parameter("calibrated").as_bool();
     position_only_ = node->get_parameter("position_only").as_bool();
+    allow_stalling_ = node->get_parameter("allow_stalling").as_bool();
     gap_zero_ = value("gap_at_zero_m"); gap_slope_ = value("gap_per_motor_rad_m");
     force_scale_ = value("force_per_motor_torque_n_nm");
     torque_scale_ = value("motor_torque_per_current_ratio_nm");
@@ -169,8 +171,18 @@ public:
         previous_sequence_ = sequence_;
         if (settled_ >= 3) {
           finish(true, false, false, "target reached; holding with current limit");
+        } else if (allow_stalling_ && closing_) {
+          // Position-only grasp: no progress while closing is a stalled closure,
+          // not a measured force or proof of object contact. Keep the configured
+          // current-limited target instead of disabling and dropping the object.
+          if (std::abs(position_-progress_position_) > tolerance_ || std::abs(velocity_) > .03 || enabled_state_ != 1) {
+            progress_position_ = position_; last_motion_ = now;
+          }
+          if (std::chrono::duration<double>(now-last_motion_).count() >= stall_timeout_) {
+            stalled_ = true;
+            finish(false, true, false, "closing stalled; holding with configured current limit; grasp unverified");
+          }
         } else if (calibrated_) {
-          // Stall means max requested force AND no movement, not merely slow motion.
           const double limit_force = commanded_current_ * torque_scale_ * force_scale_;
           const bool stalled = enabled_state_ == 1 && std::abs(velocity_) <= .03 &&
             std::abs(torque_) * force_scale_ >= .9 * limit_force;
@@ -247,6 +259,7 @@ private:
   void begin(double position, double current)
   {
     if (!active_ || faulted_) { finish(false, false, false, "controller became inactive"); return; }
+    closing_ = position > position_ + tolerance_; progress_position_ = position_;
     target_ = position; commanded_speed_ = speed_; commanded_current_ = current;
     timeout_ = goal_duration(position);
     started_ = last_motion_ = Clock::now();
@@ -267,7 +280,7 @@ private:
       result->position = gap(position_); result->effort = measured_force();
       result->reached_goal = reached; result->stalled = stalled || stalled_;
       if (canceled && goal_->is_canceling()) { goal_->canceled(result); }
-      else if (reached) { goal_->succeed(result); } else { goal_->abort(result); }
+      else if (reached || (stalled && allow_stalling_)) { goal_->succeed(result); } else { goal_->abort(result); }
       goal_.reset();
     }
   }
@@ -291,6 +304,8 @@ private:
   double position_{0}, velocity_{0}, torque_{0}, enabled_state_{0}, sequence_{0};
   double previous_sequence_{0}, stop_sequence_{0}, target_{0}, commanded_speed_{.1}, commanded_current_{.01}, timeout_{0};
   bool calibrated_{false}, position_only_{false}, active_{false}, reserved_{false}, faulted_{false};
+  bool allow_stalling_{false}, closing_{false};
+  double progress_position_{0};
   bool enabled_{false}, stopping_{false}, canceled_{false}, stalled_{false};
   int settled_{0};
   Clock::time_point started_{}, stopping_at_{}, sampled_at_{}, last_motion_{};

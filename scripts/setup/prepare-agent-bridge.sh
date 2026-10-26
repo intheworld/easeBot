@@ -44,9 +44,12 @@ fi
 if command -v uv >/dev/null; then
   UV_CACHE_DIR="${repo}/.deps/uv-cache" uv pip install --python /usr/bin/python3 \
     --target "${repo}/.deps/agent-python" \
-    --requirements "${repo}/ros2_ws/src/hei_agent_bridge/requirements-mhs.lock"
+    --reinstall-package hei-discovery \
+    --requirements "${repo}/ros2_ws/src/hei_agent_bridge/requirements-mhs.lock" \
+    "${repo}/packages/hei-discovery"
 else
   /usr/bin/python3 -m pip install --upgrade --target "${repo}/.deps/agent-python" \
-    --requirement "${repo}/ros2_ws/src/hei_agent_bridge/requirements-mhs.lock"
+    --requirement "${repo}/ros2_ws/src/hei_agent_bridge/requirements-mhs.lock" \
+    "${repo}/packages/hei-discovery"
 fi
 echo 'Ready: source scripts/env/agent-bridge.bash before running hei_agent_bridge.'

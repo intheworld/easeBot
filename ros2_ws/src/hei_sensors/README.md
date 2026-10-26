@@ -2,11 +2,32 @@
 
 `Cameras` 现在是 `rclpy.lifecycle.LifecycleNode`，默认名为 `/hei/cameras`（namespace 由 launch 设置）。三路相机 front、left_wrist、right_wrist 共用一套生命周期。
 
+front 支持 `front_backend=realsense`，通过锁定的 pyrealsense2 SDK 采集 D435
+640×480/15 FPS 彩色与深度，并将深度对齐到彩色图；腕部仍使用 OpenCV/MJPG。
+真机默认 `cameras.yaml` 已启用。统一 setup 安装 SDK 至 `.deps/sensors-python`，
+可单独 `bash scripts/setup.bash --camera-sdk`；运行前 source `scripts/env/workspace.bash`，
+支持 `PYTHONNOUSERSITE=1`，不依赖用户 site-packages。
+
+新增话题（相对 namespace）：
+
+| 话题 | 消息 | 语义 |
+| --- | --- | --- |
+| `cameras/front/aligned_depth_to_color/image_raw` | Image/32FC1 | 米制深度，已对齐 RGB；零值为无效 |
+| `cameras/front/camera_info` | CameraInfo | SDK 内参，尺寸与 RGB 一致，不虚构基座外参 |
+
+RGB、对齐深度和 CameraInfo 共用 ROS 采集时间戳及 optical frame。SDK frameset 需满足
+同一时间戳域、RGB/深度偏差 ≤50ms，启动不匹配帧在五秒内有界丢弃；采集等待可中断。
+这不是硬件同步精度承诺，移动场景仍需考虑曝光和时延。
+出厂 inverse-Brown 等模型只有零系数时按无畸变 plumb_bob 发布；非零时保留实际模型名，
+当前 XYZ 工具会拒绝不支持的模型，不套用错误公式。mock 生成 1 米深度与测试内参，
+frame_id 以 mock_ 开头。RealSense configure 只识别设备，activate 才启动流，
+deactivate 停流、cleanup 释放资源。同一 front 不会同时被 OpenCV 和 SDK 打开。
+
 | 状态转换 | 资源与行为 |
 | --- | --- |
-| configure → inactive | 校验 backend/fps，OpenCV 打开三路设备，创建生命周期图像发布器与暂停的发布定时器 |
-| activate → active | 启用图像发布器，启动 OpenCV 采集线程，恢复图像定时器 |
-| deactivate → inactive | 停止图像定时器和发布器，通知并等待采集线程停止，清除旧帧；设备保持打开 |
+| configure → inactive | 校验参数，OpenCV 打开设备、SDK 识别 D435，创建发布器与暂停的定时器 |
+| activate → active | 启用图像发布器，启动 SDK 流与采集线程，恢复图像定时器 |
+| deactivate → inactive | 停止图像发布和采集线程，停止 SDK 流，清除旧帧；OpenCV 设备保持打开 |
 | cleanup → unconfigured | 停止线程后关闭设备，销毁图像发布器和定时器；可修改配置再 configure |
 | shutdown → finalized | 停止并释放资源，生命周期不再恢复；进程不因该转换自动退出 |
 | 转换错误 | 尝试清理，成功则回到 unconfigured；线程无法停止则进入 finalized，禁止复用设备 |
@@ -36,7 +57,9 @@ ros2 lifecycle set /hei/cameras configure
 ros2 lifecycle set /hei/cameras activate
 ```
 
-图像话题、类型、frame_id 与 sensor-data QoS 保持原接口。图像仅 active 时生成/发布；raw Image 仍只在有订阅者时发送。deactivate 会丢弃缓存，activate 后等待新帧。monitor 无需改订阅，最后一帧在 1 秒后过期。
+真实 RGB 的话题、类型、frame_id 与 sensor-data QoS 沿用原接口；mock frame_id 新增 mock_ 标记。
+图像仅 active 时生成/发布；raw RGB Image 仍只在有订阅者时发送。
+deactivate 会丢弃缓存，activate 后等待新帧。monitor 无需改订阅，最后一帧在 1 秒后过期。
 
 `diagnostics` 是普通发布器，所有生命周期状态都可报告诊断，并在 values 中增加 `lifecycle_state`。inactive、unconfigured、finalized 不标为 online。生命周期 active 表示采集已启用，不保证每个设备一直健康；运行时某一路读取失败会报告逐相机 WARN，其余相机继续采集。失败设备需通过 deactivate/cleanup/configure/activate 重新打开，不在后台自动重开。
 
@@ -63,3 +86,8 @@ HEI_TEST_REAL_CAMERAS=1 python3 -m pytest -q -s ros2_ws/tests/test_robot_cameras
 退出信号可能先使 ROS context 失效，因此 main 的 finally 还执行独立资源清理。OpenCV 的驱动调用并非都可中断：停止线程有等待期限，读取卡住时转换失败，绝不在仍有读线程时 release 或重新打开同一设备。此时可能需要退出进程并检查驱动；不能保证硬件 open/read 的耗时上界。
 
 真机 `robot.launch.py` 默认包含三相机，使用 OpenCV/V4L2 与上述 USB 带宽配置。可传 `cameras:=false` 禁用，或用 `camera_config_file` 覆盖参数文件。模拟输入可显式传 `camera_backend:=mock`。
+
+相机 launch 会从 `hei_sensors` 安装前缀向上查找工作区的
+`.deps/sensors-python`，将已安装的 SDK 加入相机进程的 `PYTHONPATH`。
+因此旧终端中遗漏 SDK 搜索路径也能通过 launch 启动；仍需先通过
+`bash scripts/setup.bash --camera-sdk` 准备 SDK。

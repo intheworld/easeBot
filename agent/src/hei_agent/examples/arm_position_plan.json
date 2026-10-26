@@ -1,0 +1,103 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "plan_current_right_tcp_position",
+  "entry": "pose",
+  "max_steps": 5,
+  "timeout_sec": 110,
+  "nodes": [
+    {
+      "id": "pose",
+      "kind": "skill",
+      "inputs": {
+        "skill": "get_arm_pose",
+        "arguments": {
+          "side": "right",
+          "frame_id": "a_right_base_link"
+        }
+      }
+    },
+    {
+      "id": "plan",
+      "kind": "skill",
+      "timeout_sec": 95,
+      "inputs": {
+        "skill": "plan_arm_position",
+        "arguments": {
+          "side": "right",
+          "frame_id": "a_right_base_link",
+          "path_mode": "joint",
+          "x_m": {
+            "$ref": "nodes.pose.x_m"
+          },
+          "y_m": {
+            "$ref": "nodes.pose.y_m"
+          },
+          "z_m": {
+            "$ref": "nodes.pose.z_m"
+          }
+        }
+      }
+    },
+    {
+      "id": "valid",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.plan.validated"
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Current TCP pose planned; no motion executed",
+        "outputs": {
+          "plan_id": {
+            "$ref": "nodes.plan.plan_id"
+          },
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          }
+        }
+      }
+    },
+    {
+      "id": "failed",
+      "kind": "end",
+      "inputs": {
+        "status": "failed",
+        "message": "Arm plan collision/scene validation failed; inspect plan_ref",
+        "outputs": {
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          },
+          "validation_status": {
+            "$ref": "nodes.plan.validation_status"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "pose",
+      "target": "plan"
+    },
+    {
+      "source": "plan",
+      "target": "valid"
+    },
+    {
+      "source": "valid",
+      "target": "done",
+      "on": "true"
+    },
+    {
+      "source": "valid",
+      "target": "failed",
+      "on": "false"
+    }
+  ]
+}

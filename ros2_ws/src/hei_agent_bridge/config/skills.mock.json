@@ -1,0 +1,14 @@
+{
+  "backend": "mock",
+  "named_poses": {
+    "right": {
+      "pre_grasp": {"positions_rad": [0, 0, 0, 0, 0, 0], "duration_sec": 2},
+      "transport": {"positions_rad": [0.1, 0, 0, 0, 0, 0], "duration_sec": 2}
+    },
+    "left": {
+      "pre_grasp": {"positions_rad": [0, 0, 0, 0, 0, 0], "duration_sec": 2},
+      "transport": {"positions_rad": [0.1, 0, 0, 0, 0, 0], "duration_sec": 2}
+    }
+  },
+  "gripper_max_gap_m": 0.1
+}

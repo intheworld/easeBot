@@ -8,3 +8,5 @@ rpds-py==2026.9.1 ; python_version >= "3.11"
 typing-extensions==4.16.0
 websockets==15.0.1 ; python_version < "3.11"
 websockets==17.3 ; python_version >= "3.11"
+zeroconf==0.151.0
+ifaddr==0.2.0

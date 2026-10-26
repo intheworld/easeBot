@@ -45,6 +45,8 @@ def setup(context):
     agent_bridge = Node(package='hei_agent_bridge', executable='agent_bridge', namespace=namespace,
                         output='screen', condition=IfCondition(LaunchConfiguration('agent_bridge')),
                         parameters=[{'hub_url': LaunchConfiguration('agent_hub_url'),
+                                     'hub_id': LaunchConfiguration('agent_hub_id'),
+                                     'discovery_interface': LaunchConfiguration('agent_discovery_interface'),
                                      'device_id': LaunchConfiguration('agent_device_id')}])
     rviz = Node(package='rviz2', executable='rviz2', condition=IfCondition(LaunchConfiguration('rviz')),
                 arguments=['-d', str(description / 'rviz/hei.rviz')], output='screen')
@@ -71,7 +73,9 @@ def generate_launch_description():
         DeclareLaunchArgument('monitor_host', default_value='127.0.0.1'),
         DeclareLaunchArgument('monitor_port', default_value='8081'),
         DeclareLaunchArgument('agent_bridge', default_value='false'),
-        DeclareLaunchArgument('agent_hub_url', default_value='ws://127.0.0.1:4180'),
+        DeclareLaunchArgument('agent_hub_url', default_value='auto'),
+        DeclareLaunchArgument('agent_hub_id', default_value=''),
+        DeclareLaunchArgument('agent_discovery_interface', default_value=''),
         DeclareLaunchArgument('agent_device_id', default_value='hei-01'),
         DeclareLaunchArgument('rviz', default_value='false'),
         OpaqueFunction(function=setup),

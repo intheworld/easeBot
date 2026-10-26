@@ -2,6 +2,13 @@
 
 构建前统一执行 `bash scripts/setup.bash`；日常同步和远程编译使用 `remote-dev.py`。以下命令在仓库根目录运行，入口脚本本身不依赖当前目录。
 
+服务器只运行 Agent 时使用 `bash scripts/setup.bash --agent-server`：创建/复用 `agent/.venv`，
+安装本地共享 `packages/hei-discovery` 和 Agent 的 LLM/MHS 依赖，无需 ROS 环境。
+随后 `agent/.venv/bin/hei-agent --backend embedded --serve` 常驻接收 JSON 行任务。
+机器人默认 setup 同样安装共享发现包与 zeroconf 到 `.deps/agent-python`，不安装 Avahi 等系统服务。
+默认 setup 还准备 D435 SDK 到 `.deps/sensors-python`；单独准备可用
+`bash scripts/setup.bash --camera-sdk`，不打开相机、不安装内核模块或修改系统 Python。
+
 ```text
 scripts/
   setup.bash                      统一依赖准备入口
@@ -52,6 +59,9 @@ source ros2_ws/install/setup.bash  # 构建完成后
 ```
 
 `workspace.bash` 不代替 ROS underlay，也不自动加载应用 install。需要时可单独 source `ros-rust.bash` 或 `agent-bridge.bash`。`env/` 文件与当前工作目录无关；直接执行它们不会改变父终端的环境。
+加载后，colcon 默认通过 `CMAKE_COMMAND=/usr/bin/cmake`、`CTEST_COMMAND=/usr/bin/ctest`
+使用系统原生工具，避免 PATH 中 pip/Conda 的 CMake 启动器因 Python 模块不可见而失败。
+已有显式覆盖值会保留；不会卸载用户工具或修改终端启动配置。
 
 ## 首次准备依赖
 
@@ -98,3 +108,10 @@ python3 -m pytest -q ros2_ws/tests/test_remote_dev.py ros2_ws/tests/test_scripts
 2026-10-22 整理后验证：本地脚本测试 10 项通过；机器人原生 Jazzy 上 8 个工程包编译成功，全量测试 19 passed、1 skipped（真实相机用例默认跳过），C++ ↔ Python DDS 验收通过。机器人旧脚本副本保存在 `.deps/scripts-before-layout-*`，回归日志为 `ros2_ws/log/script-cleanup-tests.log`。
 
 2026-10-23 统一入口验证：18 项脚本测试通过，覆盖失败即停、错误环境不安装、可选 SDK、旧 SDK 备份/下载失败保留及远端目录保护。本机与 ARM64 机器均完成默认 setup；机器人随后通过远程 build 编译 9 个包。
+
+右臂抓取复用机器人已有计算环境：`bash scripts/setup.bash --grasp`。
+此独立入口仅检查 Python 计算依赖和权重，不打开硬件、不安装到 ROS 环境。
+详见 [右臂抓取说明](../docs/right-grasp.zh-CN.md)。
+
+通用末端运动依赖检查：`bash scripts/setup.bash --arm-motion`。
+复用已有 IK/MuJoCo 计算环境，无需检测器或权重；详见[末端运动说明](../docs/arm-motion.zh-CN.md)。

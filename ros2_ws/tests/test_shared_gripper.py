@@ -345,3 +345,23 @@ def test_rated_torque_threshold_accepts_old_trip_and_stops_above_rating(stack, t
     until(lambda: not any(adapter.enabled.values()))
     log = (tmp_path / 'shared.log').read_text()
     assert 'torque_exceeded=1' in log and 'torque_limit_nm=3.000000' in log
+
+
+@pytest.mark.parametrize('stack', [{'debug': True}], indirect=True)
+def test_position_only_closing_stall_holds_current_without_claiming_grasp(stack):
+    adapter, standard, wait, until, _, _, _, _ = stack
+    opened = wait(standard.send_goal_async(gripper_goal(.08, 0.)))
+    assert wait(opened.get_result_async()).result.reached_goal
+    adapter.follow_gripper = False  # Synthetic obstruction: encoder stays put.
+    handle = wait(standard.send_goal_async(gripper_goal(0., 0.)))
+    assert handle.accepted
+    result = wait(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_SUCCEEDED
+    assert result.result.stalled and not result.result.reached_goal
+    assert adapter.enabled[7]  # Current-limited hold persists after action completion.
+    assert not any(adapter.enabled[i] for i in range(1, 7))
+    assert math.isnan(result.result.effort)  # No invented Newton force calibration.
+    # Opening obstruction still times out and disables; it is not a successful grasp.
+    opening = wait(standard.send_goal_async(gripper_goal(.09, 0.)))
+    assert wait(opening.get_result_async()).status == GoalStatus.STATUS_ABORTED
+    until(lambda: not adapter.enabled[7])
