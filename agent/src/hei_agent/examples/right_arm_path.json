@@ -1,0 +1,180 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_arm_path",
+  "entry": "path",
+  "max_steps": 32,
+  "timeout_sec": 500,
+  "nodes": [
+    {
+      "id": "path",
+      "kind": "skill",
+      "timeout_sec": 30,
+      "inputs": {
+        "skill": "create_arm_path",
+        "arguments": {
+          "side": "right",
+          "frame_id": {
+            "$ref": "inputs.frame_id"
+          },
+          "path_mode": "linear"
+        }
+      }
+    },
+    {
+      "id": "point1",
+      "kind": "skill",
+      "timeout_sec": 30,
+      "inputs": {
+        "skill": "append_arm_waypoint",
+        "arguments": {
+          "path_id": {
+            "$ref": "nodes.path.path_id"
+          },
+          "x_m": {
+            "$ref": "inputs.p1_x_m"
+          },
+          "y_m": {
+            "$ref": "inputs.p1_y_m"
+          },
+          "z_m": {
+            "$ref": "inputs.p1_z_m"
+          },
+          "qx": {
+            "$ref": "inputs.p1_qx"
+          },
+          "qy": {
+            "$ref": "inputs.p1_qy"
+          },
+          "qz": {
+            "$ref": "inputs.p1_qz"
+          },
+          "qw": {
+            "$ref": "inputs.p1_qw"
+          }
+        }
+      }
+    },
+    {
+      "id": "point2",
+      "kind": "skill",
+      "timeout_sec": 30,
+      "inputs": {
+        "skill": "append_arm_waypoint",
+        "arguments": {
+          "path_id": {
+            "$ref": "nodes.path.path_id"
+          },
+          "x_m": {
+            "$ref": "inputs.p2_x_m"
+          },
+          "y_m": {
+            "$ref": "inputs.p2_y_m"
+          },
+          "z_m": {
+            "$ref": "inputs.p2_z_m"
+          },
+          "qx": {
+            "$ref": "inputs.p2_qx"
+          },
+          "qy": {
+            "$ref": "inputs.p2_qy"
+          },
+          "qz": {
+            "$ref": "inputs.p2_qz"
+          },
+          "qw": {
+            "$ref": "inputs.p2_qw"
+          }
+        }
+      }
+    },
+    {
+      "id": "plan",
+      "kind": "skill",
+      "timeout_sec": 95,
+      "inputs": {
+        "skill": "plan_arm_path",
+        "arguments": {
+          "path_id": {
+            "$ref": "nodes.path.path_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "kind": "skill",
+      "timeout_sec": 305,
+      "inputs": {
+        "skill": "execute_arm_plan",
+        "arguments": {
+          "plan_id": {
+            "$ref": "nodes.plan.plan_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "valid",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.plan.validated"
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "outputs": {}
+      }
+    },
+    {
+      "id": "failed",
+      "kind": "end",
+      "inputs": {
+        "status": "failed",
+        "message": "Path validation failed; no motion executed",
+        "outputs": {
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "path",
+      "target": "point1"
+    },
+    {
+      "source": "point1",
+      "target": "point2"
+    },
+    {
+      "source": "point2",
+      "target": "plan"
+    },
+    {
+      "source": "plan",
+      "target": "valid"
+    },
+    {
+      "source": "valid",
+      "target": "execute",
+      "on": "true"
+    },
+    {
+      "source": "valid",
+      "target": "failed",
+      "on": "false"
+    },
+    {
+      "source": "execute",
+      "target": "done"
+    }
+  ]
+}

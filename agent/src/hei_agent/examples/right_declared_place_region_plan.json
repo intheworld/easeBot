@@ -1,0 +1,107 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_declared_place_region_plan",
+  "entry": "place_region",
+  "max_steps": 8,
+  "timeout_sec": 300,
+  "nodes": [
+    {
+      "id": "place_region",
+      "kind": "skill",
+      "timeout_sec": 10,
+      "inputs": {
+        "skill": "create_place_region",
+        "arguments": {
+          "frame_id": {
+            "$ref": "inputs.frame_id"
+          },
+          "relation": {
+            "$ref": "inputs.relation"
+          },
+          "geometry_confirmed": {
+            "$ref": "inputs.geometry_confirmed"
+          },
+          "x_m": {
+            "$ref": "inputs.x_m"
+          },
+          "y_m": {
+            "$ref": "inputs.y_m"
+          },
+          "support_z_m": {
+            "$ref": "inputs.support_z_m"
+          },
+          "size_x_m": {
+            "$ref": "inputs.size_x_m"
+          },
+          "size_y_m": {
+            "$ref": "inputs.size_y_m"
+          },
+          "yaw_rad": {
+            "$ref": "inputs.yaw_rad"
+          },
+          "wall_height_m": {
+            "$ref": "inputs.wall_height_m"
+          },
+          "boundary_thickness_m": {
+            "$ref": "inputs.boundary_thickness_m"
+          }
+        }
+      }
+    },
+    {
+      "id": "place_plan",
+      "kind": "skill",
+      "timeout_sec": 185,
+      "inputs": {
+        "skill": "plan_object_placement",
+        "arguments": {
+          "side": "right",
+          "region_id": {
+            "$ref": "nodes.place_region.region_id"
+          },
+          "approach_height_m": {
+            "$ref": "inputs.approach_height_m"
+          },
+          "retreat_height_m": {
+            "$ref": "inputs.retreat_height_m"
+          },
+          "release_gap_m": {
+            "$ref": "inputs.release_gap_m"
+          }
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Region and placement planning completed; no motion sent",
+        "outputs": {
+          "validated": {
+            "$ref": "nodes.place_plan.validated"
+          },
+          "plan_id": {
+            "$ref": "nodes.place_plan.plan_id"
+          },
+          "plan_ref": {
+            "$ref": "nodes.place_plan.plan_ref"
+          },
+          "region_id": {
+            "$ref": "nodes.place_region.region_id"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "place_region",
+      "target": "place_plan"
+    },
+    {
+      "source": "place_plan",
+      "target": "done"
+    }
+  ]
+}

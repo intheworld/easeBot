@@ -33,7 +33,8 @@ def object_plan(request):
     except ValueError as error:
         raise ValueError(f'Invalid starting right gripper: {error}') from error
     obb = request['object']
-    planner = RightArmPlanner(request['urdf'])
+    from hei_agent_bridge.grasp.planner_backend import get_planner
+    planner = get_planner(request['urdf'],request['profile'].get('ik_backend','auto'))
     geometry = gripper_geometry(request['urdf'],profile)
     up,support = support_geometry(request['urdf'],state,profile['scene'])
     if not np.allclose(up,np.asarray(obb['rotation'])[:,2],atol=1e-5):
@@ -49,7 +50,7 @@ def object_plan(request):
             pre_q = planner.solve(pre,np.asarray(state['right']))
             approach = planner.cartesian_path(pre_q,goal)
             plan = dict(schema_version=3,strategy='top_down_direct_ik',
-                        class_name=obb['target'],confidence=obb['confidence'],
+                        carry=request.get('carry'),class_name=obb.get('detection_prompt',obb['target']),confidence=obb['confidence'],
                         base_frame=planner.fk.base_frame,tool_frame=planner.fk.tool_frame,
                         urdf_sha256=planner.fk.sha256,start_joint_rad=state['right'],
                         start_gripper_rad=state['right_gripper'],
@@ -60,6 +61,7 @@ def object_plan(request):
                         jaw_width_m=candidate['jaw_width_m'])
             scene = {**profile['scene'],'left_joint_rad':state['left'],'lift_joint_m':state['lift'],
                      'left_finger_opening_m':float(np.clip(-state['left_gripper']/4.5,0,1))*.05}
+            if obb.get('known_obstacle_id'):scene['release_object_body']='placed_'+obb['known_obstacle_id']
             report,_,_ = validate_plan(plan,request['urdf'],scene)
             result = {'plan':plan,'validation':report}
             attempts.append({'candidate_index':index,'status':report['status'],
@@ -79,11 +81,35 @@ def object_plan(request):
     raise ValueError(f'No reachable top-down grasp candidate: {reason}; inspect candidates.json')
 
 
+_detector_key = None
+_detector = None
+
+
+def cached_detector(path):
+    global _detector_key, _detector
+    path = Path(path).resolve(strict=True)
+    stat = path.stat()
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if key != _detector_key:
+        from ultralytics import YOLO
+        _detector = YOLO(str(path))
+        _detector_key = key
+    return _detector
+
+
 def compute(request, detector=None):
     operation = request.get('operation')
+    if detector is None and operation in ('observe_payload', 'refine_wrist', 'perceive', 'perceive_region'):
+        detector = cached_detector(request['profile']['model_path'])
+    if operation == 'observe_payload':
+        from hei_agent_bridge.grasp.holding import observe_payload
+        return observe_payload(request,detector)
+    if operation == 'refine_wrist':
+        from hei_agent_bridge.grasp.wrist import refine_request
+        return refine_request(request,detector)
     if operation == 'plan_object':
         return object_plan(request)
-    if operation != 'perceive':
+    if operation not in ('perceive','perceive_region'):
         raise ValueError(f'Unsupported grasp operation: {operation!r}')
     target = grasp_target(request['target'])
     profile = request['profile']
@@ -98,40 +124,67 @@ def compute(request, detector=None):
     if detector is None:
         from ultralytics import YOLO
         detector = YOLO(profile['model_path'])
-    detector.set_classes([target])
-    # Small tabletop objects need a larger detector input; depth projection still
-    # uses the original aligned RGB-D resolution and intrinsics.
-    inference_size = 1280
-    results = detector.predict(image, verbose=False, device='cpu', conf=.25, iou=.45,
-                               imgsz=inference_size)
-    from hei_agent_bridge.grasp.obb import segmented_cloud, visible_obb, support_geometry
+    from hei_agent_bridge.grasp.obb import visible_obb, support_geometry
+    from hei_agent_bridge.grasp.detection import detect_cloud
     transform = camera_transform(request['calibration'])
-    diagnostics = {'confidence_threshold': .25, 'inference_size': inference_size,
-                   'image_width': image.shape[1],
-                   'image_height': image.shape[0]}
+    diagnostics = {'image_width': image.shape[1], 'image_height': image.shape[0]}
     try:
-        confidence,points,mask = segmented_cloud(results,depth,info['k'],target,transform,diagnostics)
+        confidence,points,mask,prompt = detect_cloud(detector,image,depth,info['k'],target,transform,
+            profile.get('detector_prompt_aliases',{}),diagnostics,directory)
+        if operation=='perceive_region' and diagnostics.get('unique_segmented_objects',diagnostics.get('segmented_detections',0))!=1:
+            raise ValueError('Ambiguous placement target; specify a unique container or support')
     finally:
         (directory/'perception.json').write_text(json.dumps(diagnostics,allow_nan=False))
+    if operation=='perceive_region':
+        from hei_agent_bridge.grasp.place_region import estimate_region
+        from hei_agent_bridge.arm.geometry import base_from_frame
+        frame=np.linalg.inv(base_from_frame(request['urdf'],request['state'],'base_footprint'))
+        region_diagnostics={}
+        np.save(directory/'region_cloud.npy',points,allow_pickle=False)
+        cv2.imwrite(str(directory/'region_mask.png'),mask.astype(np.uint8)*255)
+        try:
+            region=estimate_region(points,frame,request['relation'],depth_observation=dict(
+                depth=depth,mask=mask,intrinsic=info['k'],camera_to_footprint=frame@transform),
+                diagnostics=region_diagnostics)
+        finally:
+            if 'coverage_image' in region_diagnostics:
+                cv2.imwrite(str(directory/'region_coverage.png'),region_diagnostics.pop('coverage_image'))
+            if 'inferred_mask' in region_diagnostics:
+                cv2.imwrite(str(directory/'region_inferred_depth.png'),region_diagnostics.pop('inferred_mask'))
+            (directory/'region_diagnostics.json').write_text(json.dumps(region_diagnostics,allow_nan=False))
+        region.update(target=target,detection_prompt=prompt,confidence=confidence,observation_id=request['observation_id'])
+        return {'region':region}
     up,_ = support_geometry(request['urdf'],request['state'],profile['scene'])
     obb = visible_obb(points,up)
-    obb.update(target=target,confidence=confidence)
+    obb.update(target=target,detection_prompt=prompt,confidence=confidence)
     np.save(directory/'object_cloud.npy',points,allow_pickle=False)
     cv2.imwrite(str(directory/'object_mask.png'),mask.astype(np.uint8)*255)
     return {'object':obb}
 
 
-def main():
-    directory = Path(sys.argv[1])
+def run(directory):
     try:
-        result = compute(json.loads((directory / 'request.json').read_text()))
+        request=json.loads((directory/'request.json').read_text())
+        if request.get('operation')=='warmup':
+            from hei_agent_bridge.compute_warmup import warmup
+            result=warmup(request)
+        else:
+            result=compute(request)
     except Exception as exc:
         result = {'error': f'{type(exc).__name__}: {exc}'}
+        from hei_agent_bridge.grasp.wrist import WristTargetError
+        if isinstance(exc,WristTargetError) and exc.count==0:
+            result['error_code']='wrist_observation_unavailable'
     output = directory / 'result.json'
     temporary = output.with_suffix('.part')
     temporary.write_text(json.dumps(result, allow_nan=False), encoding='utf-8')
     temporary.replace(output)
     return 1 if 'error' in result else 0
+
+
+def main():
+    from hei_agent_bridge.compute_server import entry
+    return entry(run)
 
 
 if __name__ == '__main__':

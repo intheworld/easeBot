@@ -1,5 +1,6 @@
 """Bounded latest-data cache; ROS callbacks never call the network SDK."""
 from dataclasses import dataclass
+from collections import OrderedDict
 import json
 import math
 import threading
@@ -34,6 +35,7 @@ class RobotCache:
         self.mode = 'UNKNOWN'
         self.last_manager = None
         self.frames = {}
+        self.front_frames = OrderedDict()
         self.base = None
         self.last_base = None
         from .vision import PerceptionCache
@@ -85,6 +87,10 @@ class RobotCache:
         frame = Frame(data, image.shape[1], image.shape[0], stamp, time.monotonic(), time.time(), msg.header.frame_id)
         with self.lock:
             self.frames[name] = frame
+            if name == 'front':
+                self.front_frames[stamp] = frame
+                while len(self.front_frames) > 8:
+                    self.front_frames.popitem(last=False)
 
     def frame(self, name):
         with self.lock:

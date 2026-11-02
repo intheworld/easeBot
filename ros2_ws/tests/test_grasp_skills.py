@@ -35,9 +35,10 @@ def test_real_model_fk_ik_and_camera_transform():
 class Backend:
     def __init__(self):
         self.state = {'right': [.4, -.5, -.7, .2, .3, .8], 'left': [0.]*6, 'lift': -.149365,
-                      'left_gripper': 0., 'right_gripper': -.1, 'wheels': [0.]*4}
+                      'left_gripper': 0., 'right_gripper': 0., 'wheels': [0.]*4}
         self.calls, self.cancelled = [], []
         self.delay = 0
+        self.closed_contact = False
     def grasp_state(self, **kwargs):
         return deepcopy(self.state)
     def ready(self):
@@ -47,7 +48,13 @@ class Backend:
     async def grasp_gripper(self, invocation, gap, *, close):
         self.calls.append(('close' if close else 'open', invocation, gap))
         await asyncio.sleep(self.delay)
+        self.state['right_gripper']=-1.5 if close else -gap/(.1/4.5)
+        self.closed_contact=close
         return close
+    def gripper_contact(self,profile):
+        return dict(physical_capture_verified=self.closed_contact,
+            contact_state='sustained_jaw_load_contact' if self.closed_contact else 'no_completed_closure',
+            torque_nm=.2 if self.closed_contact else 0.)
     async def grasp_trajectory(self, invocation, start, path, speed):
         self.calls.append(('trajectory', invocation, deepcopy(path)))
         await asyncio.sleep(self.delay)
@@ -64,6 +71,7 @@ def make_service(tmp_path):
     profile = json.loads((ROOT / 'ros2_ws/src/hei_agent_bridge/config/right_grasp.json').read_text())
     model = tmp_path / 'weights.pt'; model.write_bytes(b'test')
     profile.update(model_path=str(model), worker_python=sys.executable)
+    profile['wrist_refinement']['enabled']=False
     service = GraspSkills(profile, cameras, backend, directory=tmp_path/'plans',
                           urdf=ROOT / 'ros2_ws/src/hei_description/urdf/hei_body.urdf')
     async def compute(directory):
@@ -74,7 +82,7 @@ def make_service(tmp_path):
                 'geometry_scope':'visible_surface_only','center_m':[.4,.1,.2],
                 'size_m':[.06,.03,.04],'rotation':np.eye(3).tolist()}}
         plan = {'schema_version':3,'strategy':'top_down_direct_ik',
-                'T_grasp': np.eye(4).tolist(), 'pregrasp_joint_rad': [.1]*6,
+                'target_obb':request['object'], 'T_grasp': np.eye(4).tolist(), 'pregrasp_joint_rad': [.1]*6,
                 'approach_joint_rad': [[.2]*6]}
         return {'plan': plan, 'validation': {'status': 'passed'}}
     service._worker = compute
@@ -102,7 +110,7 @@ def test_grasp_plan_execute_single_use_and_current_limited_close(tmp_path):
         plan_id = result['outputs']['plan_id']
         result = await invoke(skills, 'execute_right_grasp', {'plan_id':plan_id}, 'execute')
         assert result['status'] == 'succeeded', result
-        assert result['outputs'] == {'plan_id':plan_id, 'completed':True, 'gripper_stalled':True, 'grasp_verified':False}
+        assert result['outputs'] == {'plan_id':plan_id, 'completed':True, 'gripper_stalled':True, 'grasp_verified':True, 'wrist_refined':False}
         assert [v[0] for v in backend.calls] == ['open','trajectory','trajectory','close']
         result = await invoke(skills, 'execute_right_grasp', {'plan_id':plan_id}, 'replay')
         assert result['status'] == 'failed' and 'consumed' in result['message']
@@ -120,7 +128,7 @@ def test_no_dispatch_on_invalid_plan(tmp_path, problem):
         if problem == 'collision': entry['data']['validation']['status'] = 'failed'
         if problem == 'format': entry['data']['plan']['schema_version'] = 2
         if problem == 'pose': backend.state['right'][0] += .1
-        if problem == 'scene': backend.state['left'][0] += .1
+        if problem == 'scene': backend.state['lift'] += .1
         if problem == 'model': Path(service.profile['model_path']).write_bytes(b'changed')
         result = await invoke(skills, 'execute_right_grasp', {'plan_id':id}, 'bad')
         assert result['status'] == 'failed', result
@@ -257,3 +265,15 @@ def test_worker_sets_detector_target_for_each_request(tmp_path,monkeypatch):
         with pytest.raises(ValueError,match='No segmented RGB-D object'):
             worker.compute({**request,'target':target},detector=detector)
     assert detector.targets==[['cube'],['banana']]
+
+
+def test_left_arm_motion_does_not_abort_right_grasp(tmp_path):
+    async def run():
+        service, skills, backend, _ = make_service(tmp_path)
+        result = await make_obb_plan(skills)
+        backend.state['left'][0] += .1
+        backend.state['left_gripper'] += .1
+        result = await invoke(skills, 'execute_right_grasp',
+                              {'plan_id':result['outputs']['plan_id']}, 'execute')
+        assert result['status'] == 'succeeded', result
+    asyncio.run(run())

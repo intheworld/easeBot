@@ -99,3 +99,79 @@ def test_snapshot_bounds_expiry_and_mock_marking():
         with pytest.raises(RuntimeError, match='expired'):
             skills.read_asset(last['observation_id'], 'rgb')
     asyncio.run(exercise())
+
+
+def test_matching_depth_survives_newer_callback():
+    async def exercise():
+        cache, depth = cache_fixture()
+        # RGB stamp 1 is still the latest JPEG while depth stamp 2 arrives.
+        depth.header.stamp.sec = 2
+        cache.perception.depth_image(depth)
+        skills = CameraSkills(cache)
+        result = await skills.capture({'camera': 'front'}, 'overlap')
+        assert result['stamp_sec'] == 1.
+        assert result['depth_available'] and result['calibrated']
+        assert np.all(skills._get(result['observation_id'])['depth'] == 2.)
+    asyncio.run(exercise())
+
+
+def test_depth_history_is_bounded_and_does_not_revive_stale_pairs():
+    async def exercise():
+        cache, depth = cache_fixture()
+        cache.perception.depth_history[(1, 0)] = replace(
+            cache.perception.depth, received=time.monotonic() - 2)
+        depth.header.stamp.sec = 2
+        cache.perception.depth_image(depth)
+        result = await CameraSkills(cache).capture({'camera': 'front'}, 'stale-pair')
+        assert not result['depth_available']
+        for stamp in range(3, 12):
+            depth.header.stamp.sec = stamp
+            cache.perception.depth_image(depth)
+        assert len(cache.perception.depth_history) == 8
+        with cache.lock:
+            assert cache.perception.depth_for_stamp((1, 0)) is None
+    asyncio.run(exercise())
+
+
+def publish_rgb(cache,stamp):
+    msg=CompressedImage(format='jpeg',data=cv2.imencode('.jpg',np.zeros((4,4,3),np.uint8))[1].tobytes())
+    msg.header.stamp.sec=stamp;msg.header.frame_id='front_optical';cache.image('front',msg)
+
+
+def test_capture_uses_newest_complete_pair_when_latest_rgb_has_no_depth():
+    async def exercise():
+        cache,_=cache_fixture()
+        publish_rgb(cache,2)
+        result=await CameraSkills(cache).capture({'camera':'front'},'missing-depth')
+        assert result['depth_available'] and result['stamp_sec']==1.
+    asyncio.run(exercise())
+
+
+def test_capture_recovers_on_next_complete_frame_instead_of_waiting_for_lost_stamp():
+    async def exercise():
+        cache,depth=cache_fixture(depth_stamp=9)
+        async def next_frame():
+            await asyncio.sleep(.01)
+            publish_rgb(cache,2);depth.header.stamp.sec=2;cache.perception.depth_image(depth)
+        task=asyncio.create_task(next_frame())
+        result=await CameraSkills(cache).capture({'camera':'front'},'next-pair')
+        await task
+        assert result['depth_available'] and result['stamp_sec']==2.
+    asyncio.run(exercise())
+
+
+def test_front_history_bound_and_newest_complete_pair():
+    async def exercise():
+        cache,depth=cache_fixture()
+        for stamp in range(2,12):
+            publish_rgb(cache,stamp);depth.header.stamp.sec=stamp;cache.perception.depth_image(depth)
+        assert len(cache.front_frames)==8
+        result=await CameraSkills(cache).capture({'camera':'front'},'latest-pair')
+        assert result['stamp_sec']==11. and result['depth_available']
+        for stamp,frame in list(cache.front_frames.items()):
+            cache.front_frames[stamp]=replace(frame,received=time.monotonic()-2)
+        # A fresh unmatched RGB must not resurrect expired older complete pairs.
+        publish_rgb(cache,12)
+        result=await CameraSkills(cache).capture({'camera':'front'},'stale-history')
+        assert result['stamp_sec']==12. and not result['depth_available']
+    asyncio.run(exercise())

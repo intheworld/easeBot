@@ -155,6 +155,7 @@ def segmented_cloud(results, depth, intrinsic, target, camera_to_base, diagnosti
     if depth.ndim != 2 or not np.isfinite(k).all() or k[0,0] <= 0 or k[1,1] <= 0:
         raise ValueError('Invalid aligned depth/intrinsics')
     candidates = []
+    segmented_masks=[]
     report = diagnostics if diagnostics is not None else {}
     report.update(target=target, detections=0, matching_detections=0, segmented_detections=0,
                   objects=[])
@@ -173,6 +174,7 @@ def segmented_cloud(results, depth, intrinsic, target, camera_to_base, diagnosti
             report['segmented_detections'] += 1
             mask = cv2.resize(np.asarray(segments[index],dtype=np.float32),(depth.shape[1],depth.shape[0]),
                               interpolation=cv2.INTER_NEAREST) > .5
+            segmented_masks.append((float(score),mask))
             v,u = np.nonzero(mask & np.isfinite(depth) & (depth>0))
             report['objects'].append(dict(confidence=float(score), mask_pixels=int(mask.sum()),
                                           valid_depth_pixels=int(len(u))))
@@ -191,4 +193,20 @@ def segmented_cloud(results, depth, intrinsic, target, camera_to_base, diagnosti
         else:
             reason = 'segmentation masks contain fewer than 30 valid depth pixels'
         raise ValueError(f'No segmented RGB-D object for target {target!r}: {reason}; inspect perception.json')
+    # A model may emit overlapping boxes for one visible instance. Retain the
+    # highest-confidence mask without unioning/expanding its support geometry.
+    # Count even masks lacking depth, so missing depth cannot hide ambiguity.
+    kept=[];suppressed=[]
+    for index in sorted(range(len(segmented_masks)),key=lambda i:-segmented_masks[i][0]):
+        mask=segmented_masks[index][1];area=int(mask.sum());duplicate=None
+        for other in kept:
+            previous=segmented_masks[other][1];other_area=int(previous.sum())
+            if not area or not other_area:continue
+            intersection=int(np.count_nonzero(mask&previous))
+            iou=intersection/(area+other_area-intersection)
+            if iou>=.9:
+                duplicate=dict(index=index,retained_index=other,mask_iou=iou);break
+        if duplicate is None:kept.append(index)
+        else:suppressed.append(duplicate)
+    report.update(unique_segmented_objects=len(kept),suppressed_duplicate_masks=suppressed)
     return max(candidates,key=lambda item:item[0])

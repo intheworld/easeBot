@@ -10,7 +10,7 @@ import sys
 
 from .agent import Agent
 from .executor import RunStatus
-from .graph import Graph
+from .graph import Graph, json_data
 from .llm import LLMConfig, OpenAIChatModel
 from .mock import MockConnector
 from .node import NodeRegistry
@@ -63,9 +63,9 @@ async def serve_requests(args, hub):
                 return {'status': 'stopped'}, 0
             try:
                 value = json.loads(line)
-                allowed = {'task', 'graph', 'list_skills', 'side', 'plan_only', 'validate'}
+                allowed = {'task', 'graph', 'list_skills', 'side', 'plan_only', 'validate', 'inputs'}
                 if type(value) is not dict or value.keys() - allowed:
-                    raise ValueError('Request must be an object containing task/graph/list_skills and optional side/plan_only/validate')
+                    raise ValueError('Request must be an object containing task/graph/list_skills and optional side/plan_only/validate/inputs')
                 if sum(bool(value.get(key)) for key in ('task', 'graph', 'list_skills')) != 1:
                     raise ValueError('Specify exactly one of task, graph or list_skills')
                 for key in ('task', 'graph'):
@@ -74,6 +74,8 @@ async def serve_requests(args, hub):
                 for key in ('list_skills', 'plan_only', 'validate'):
                     if key in value and type(value[key]) is not bool:
                         raise ValueError(f'{key} must be boolean')
+                if 'inputs' in value and type(value['inputs']) is not dict:
+                    raise ValueError('inputs must be an object')
                 request = argparse.Namespace(**vars(args))
                 request.task, request.graph, request.list_skills = None, None, False
                 request.plan_only = request.validate = False
@@ -96,6 +98,10 @@ async def serve_requests(args, hub):
 
 
 async def run_policy(args, connector):
+    supplied=json_data(getattr(args,'inputs',{}))
+    if type(supplied) is not dict:raise ValueError('Run inputs must be an object')
+    if 'side' in supplied and supplied['side']!=args.side:raise ValueError('inputs.side conflicts with side')
+    inputs={'side':args.side,**supplied}
     if args.list_skills:
         return {'backend': args.backend, 'revision': connector.catalog.revision,
                 'execution_backend': connector.catalog.backend,
@@ -106,7 +112,7 @@ async def run_policy(args, connector):
         config = LLMConfig.from_env(model=args.llm_model, base_url=args.llm_base_url,
                                     timeout_sec=args.llm_timeout, response_format=args.llm_response_format)
         planner = GraphPlanner(OpenAIChatModel(config), connector.catalog, repair_attempts=args.repair_attempts)
-        plan = await planner.generate(args.task, {'side': args.side},
+        plan = await planner.generate(args.task, inputs,
                                       directory=args.plan_dir or f'{args.trace_dir}/plans')
         graph = plan.graph
         plan_info = {'id': plan.id, 'graph': str(plan.graph_path), 'model': plan.model,
@@ -124,7 +130,7 @@ async def run_policy(args, connector):
         # An unbound file is a template: validate its entire contract before
         # pinning it to the catalog just discovered for this request. A graph
         # already pinned to an older revision must still fail, never rebind.
-        validate_plan(graph, {'side': args.side}, connector.catalog)
+        validate_plan(graph, inputs, connector.catalog)
         if graph.catalog_revision is None:
             if connector.catalog.revision is None:
                 raise ValueError('MHS catalog has no discovered revision')
@@ -132,7 +138,7 @@ async def run_policy(args, connector):
     if args.validate:
         return {'graph': graph.name, 'valid': True, 'nodes': len(graph.nodes)}, 0
     result = await Agent(graph, connector, cancel_timeout_sec=12 if args.backend in ('mhs', 'embedded') else 5).run(
-        {'side': args.side}, trace_dir=args.trace_dir)
+        inputs, trace_dir=args.trace_dir)
     output = {'backend': args.backend, 'run_id': result.run_id, 'status': result.status.value,
               'execution_backend': connector.catalog.backend,
               'steps': result.steps, 'outputs': result.outputs, 'message': result.message,
@@ -168,6 +174,7 @@ def main():
     parser.add_argument('--llm-response-format', choices=['json', 'text'], help='Override LLM_RESPONSE_FORMAT')
     parser.add_argument('--repair-attempts', type=int, choices=[0, 1, 2], default=1,
                         help='Extra model calls to repair invalid graphs, not motion retries (default 1)')
+    parser.add_argument('--inputs',type=json.loads,default={},help='JSON object of explicit graph/task parameters')
     parser.add_argument('--side', choices=['left', 'right'], default='right')
     parser.add_argument('--not-ready', action='store_true', help='Exercise the readiness failure branch')
     parser.add_argument('--fail-at', choices=['pre_grasp', 'transport'])

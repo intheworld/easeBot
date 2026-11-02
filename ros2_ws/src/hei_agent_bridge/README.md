@@ -5,6 +5,10 @@
 采用 Python `src` 布局：外层是 ROS 包，Python 模块放在独立的源码目录中。
 包名、导入名和 `ros2 run/launch` 命令保持 `hei_agent_bridge`。
 
+抓取的可选右腕 RGB 矫正封装在 `execute_right_grasp` 内部，在悬停后、下降前运行。
+需要实测腕部内参与相机到 TCP 的变换；当前默认关闭，缺标定时启用会在运动前拒绝。
+配置、边界和诊断见 [右臂抓取文档](../../../docs/right-grasp.zh-CN.md#抓取内部的右腕-rgb-矫正)。
+
 ```text
 hei_agent_bridge/
   package.xml / setup.py / setup.cfg   ROS 包与安装配置
@@ -253,3 +257,52 @@ are no longer supported. Rediscover the catalog and regenerate plans after updat
 It reuses the existing compute environment, weights and calibration without opening
 serial ports in the worker. ROS controllers remain the only hardware owners.
 See [右臂抓取文档](../../../docs/right-grasp.zh-CN.md) for setup and the three current examples.
+
+
+### 右臂回零命令
+
+抓取测试后可在 Agent 的 JSON 命令入口提交：
+
+```json
+{"graph":"agent/src/hei_agent/examples/right_arm_home.json"}
+```
+
+此图调用 `plan_arm_home(side="right")`，将六个关节目标设为 `[0,0,0,0,0,0] rad`，
+检查完整关节轨迹的限位和机器人/桌面碰撞；仅 `validated=true` 才调用
+`execute_arm_plan`。复用配置的关节速度（默认 0.1 rad/s）、单次计划、取消及场景监控。
+到位同时检查实际关节最大误差不超过 0.03 rad，以及既有 TCP 精度要求。
+夹爪、左臂、底盘和升降不随此命令运动，不写编码器零点，不自动重试或规划绕障。
+若夹爪仍持有物体，现有碰撞模型不包含所持物体。
+
+只规划、查看检查结果而不运动时使用 `right_arm_home_plan.json`。
+需要启用 `arm_motion` 或 `right_grasp` 的 ROS bridge 配置；抓取配置已自动包含这些手臂技能。
+升级后重启 bridge 与 Agent 以重新发现 catalog，再提交新图。
+
+### 搬运与放置
+
+新增相对移动、机器人端多路点、持物模型和放置技能。抓取成功后自动维护右臂
+TCP 相对物体几何，通用运动和回零也检查携带物；放置验证包括转移、松爪和撤回。
+首次启用时若夹爪实际已持物，应先用人工确认的 `set_carried_object_geometry` 声明模型。
+模型只保留在内存；不再读写 `log/hei_payload/state.json`。实时全开反馈清除当前持物模型，小幅夹爪变化不再锁死。`observe_gripper` 提供实时开度与腕部视觉一致性证据；重启后没有物体几何不等于证明夹爪为空。
+
+接口、参数化 GaP 图和故障恢复见 [机械臂运动与搬运](../../../docs/arm-motion.zh-CN.md)。
+
+区域放置：`create_place_region` / `perceive_place_region` 产生机器人保存的放置区域，`plan_object_placement` 结合携物尺寸、区域底面和盒壁生成计划，再由 `execute_place_plan` 执行。视觉入口在配置了 `right_grasp` 模型和标定后发布。详见 [区域放置](../../../docs/arm-motion.zh-CN.md#按区域放置桌面上盒子里)。
+
+For solid objects explicitly allowed to tilt during placement, `plan_object_placement_with_tilt` adds a required `max_tilt_deg` (0..10) to the region placement inputs. It tries the original pose policy first and then small inclination changes, recomputing footprint, support height and complete collision checks. `plan_object_placement` now defaults to allowing up to 10 degrees of additional outward tilt, trying the preserved inclination first. The tilt examples pass 10 directly; use the explicit tilt skill with 0 to preserve inclination. See `docs/arm-motion.zh-CN.md` and the `right_*place_region_tilt*.json` Agent examples. Saved-plan validation is not a claim of physical placement success.
+
+`observe_gripper` now reports `physical_capture_verified` from live sustained jaw/load contact after a completed close command. It requires >=0.25 s of distinct motor feedback, latest <=0.2 s old, opening > closed target +2 mm and < fully-open -2 mm, gap span <=1 mm, |motor velocity| <=0.05 rad/s, enabled state, and |measured torque| >=0.1 Nm for >=80% of the window with median magnitude >=0.1 Nm. `torque_nm` is motor feedback, not commanded current or calibrated jaw force. `contact_state` explains rejection. This is contact evidence, not a holding-force/slip guarantee. No motion is issued by observation; no geometry is created from contact alone. Missing feedback yields false; no verification state is persisted.
+
+For `on` support perception, the grid resolution now adapts to measured extent (2–8 mm). One-cell boundary erosion therefore removes 2 mm per side on small blocks, while large surfaces retain the 8 mm grid. Perception returns observed supports larger than 1 cm; payload fit remains a separate planning check. For `on`, user-authorized overhang is allowed when the estimated uniform-box center of mass projects inside an observed support rectangle, with the existing payload-padding +5 mm center margin. `inside` retains full padded footprint containment. No unseen support is inferred. `region_diagnostics.json` records measured/usable extents, grid resolution and inset.
+
+Front RGB-D detection reports raw `segmented_detections` and `unique_segmented_objects`. Masks for the same target with IoU >=0.9 are treated as duplicate observations of one instance; the highest-confidence mask is retained without geometric union. Distinct masks, including those lacking valid depth, still count toward placement ambiguity. Suppressed mask indices and overlap are saved in `perception.json`.
+
+`observe_gripper` is motor-only: it reads the already collected jaw/torque window and never captures RGB, invokes a vision worker, or checks arm/base/lift settling. Visual `scene_changed` cannot override contact. Its existing output shape is retained (`wrist_state=not_requested`, empty observation ID). Optional wrist inspection is exposed separately as `observe_gripper_visual`. Neither interface issues movement or gripper commands.
+
+### 状态与碰撞模块边界
+
+持物状态只保存在进程内存。启动时为 `unknown`，新鲜的全开或零位闭合反馈可建立初始空爪状态；中间开度不能作为空爪证据。抓取闭合后先保留待确认几何，连续的实测开度、速度、负载和使能反馈确认后才标记 `attached`；检测到闭空则清除待确认模型。连续接触证据不接受超过 100 ms 的相邻反馈间隔。
+
+在线碰撞场景由 `collision/fcl_scene.py` 实现，共享 CAD 分块在 `collision/meshes.py`。显式离线 MuJoCo 构建和位姿计算放在 `collision/mujoco_scene.py`，在线导入不加载它。`grasp/validation.py` 保留采样、碰撞策略及旧离线脚本的惰性兼容入口。
+
+`on` 支撑面从已观测的候选中选择最高表面，避免较稠密的低处点云覆盖目标顶面；选定后的噪声、倾斜与可用区域检查仍然执行。

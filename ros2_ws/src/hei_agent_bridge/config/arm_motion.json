@@ -1,6 +1,7 @@
 {
-  "worker_python": "~/miniconda3/envs/rebotarm/bin/python",
-  "joint_speed_rad_s": 0.1,
+  "ik_backend": "auto",
+  "worker_python": "~/gitdir/easeBot/.deps/gpu-planner-venv/bin/python",
+  "joint_speed_rad_s": 0.6,
   "scene": {
     "table_frame": "base_footprint",
     "table_top_z_m": 0.8005,
@@ -36,5 +37,12 @@
       }
     ],
     "scene_confirmed": true
-  }
+  },
+  "gap_per_motor_rad_m": -0.022222222222222223,
+  "release_clearance_m": 0.006,
+  "payload_padding_m": 0.003,
+  "max_unknown_support_fraction": 0.5,
+  "startup_warmup": true,
+  "worker_idle_timeout_sec": 0,
+  "persistent_worker": true
 }

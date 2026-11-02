@@ -1,10 +1,8 @@
 """GaP-inspired geometry boundary, candidate planning and no-motion perception."""
 import asyncio
-from copy import deepcopy
 import json
 from pathlib import Path
 import sys
-import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -152,7 +150,8 @@ def test_perception_obb_plan_and_stop_after_close(tmp_path):
         result=await invoke(skills,'execute_right_grasp',{'plan_id':plan['outputs']['plan_id']},'execute')
         assert result['status']=='succeeded',result
         assert [c[0] for c in backend.calls]==['open','trajectory','trajectory','close']
-        assert result['outputs']['grasp_verified'] is False
+        assert result['outputs']['grasp_verified'] is True
+        assert service.carry.status=='attached'
     asyncio.run(run())
 
 

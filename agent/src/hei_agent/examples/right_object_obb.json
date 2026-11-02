@@ -25,7 +25,7 @@
           "observation_id": {
             "$ref": "nodes.capture.observation_id"
           },
-          "target": "blue cube"
+          "target": "blue block"
         }
       }
     },

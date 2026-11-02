@@ -1,0 +1,336 @@
+{
+  "schema": "hei.example_variants/v1",
+  "variants": {
+    "arm_position_plan.json": {
+      "source": "arm_position_execute.json",
+      "nodes": [
+        "pose",
+        "plan",
+        "valid",
+        "done",
+        "failed"
+      ],
+      "set": {
+        "name": "plan_current_right_tcp_position",
+        "max_steps": 5,
+        "timeout_sec": 110,
+        "nodes/done/inputs/message": "Current TCP pose planned; no motion executed",
+        "nodes/done/inputs/outputs/plan_id": {
+          "$ref": "nodes.plan.plan_id"
+        },
+        "nodes/done/inputs/outputs/plan_ref": {
+          "$ref": "nodes.plan.plan_ref"
+        }
+      },
+      "remove": [
+        "nodes/done/inputs/outputs/position_error_m",
+        "nodes/done/inputs/outputs/z_m",
+        "nodes/done/inputs/outputs/x_m",
+        "nodes/done/inputs/outputs/reached_goal",
+        "nodes/done/inputs/outputs/frame_id",
+        "nodes/done/inputs/outputs/y_m",
+        "nodes/done/inputs/outputs/orientation_error_rad"
+      ],
+      "edges": [
+        {
+          "source": "pose",
+          "target": "plan"
+        },
+        {
+          "source": "plan",
+          "target": "valid"
+        },
+        {
+          "source": "valid",
+          "target": "done",
+          "on": "true"
+        },
+        {
+          "source": "valid",
+          "target": "failed",
+          "on": "false"
+        }
+      ]
+    },
+    "right_arm_home_plan.json": {
+      "source": "right_arm_home.json",
+      "nodes": [
+        "plan",
+        "done"
+      ],
+      "set": {
+        "name": "right_arm_home_plan",
+        "max_steps": 2,
+        "timeout_sec": 100,
+        "nodes/done/inputs/message": "Home planning completed; no motion sent",
+        "nodes/done/inputs/outputs/validated": {
+          "$ref": "nodes.plan.validated"
+        },
+        "nodes/done/inputs/outputs/plan_ref": {
+          "$ref": "nodes.plan.plan_ref"
+        },
+        "nodes/done/inputs/outputs/plan_id": {
+          "$ref": "nodes.plan.plan_id"
+        },
+        "nodes/done/inputs/outputs/nominal_duration_sec": {
+          "$ref": "nodes.plan.nominal_duration_sec"
+        }
+      },
+      "remove": [
+        "nodes/done/inputs/outputs/joint_error_rad",
+        "nodes/done/inputs/outputs/reached_goal"
+      ],
+      "edges": [
+        {
+          "source": "plan",
+          "target": "done"
+        }
+      ]
+    },
+    "right_arm_offset_plan.json": {
+      "source": "right_arm_offset.json",
+      "nodes": [
+        "plan",
+        "done"
+      ],
+      "set": {
+        "name": "right_arm_offset_plan",
+        "timeout_sec": 240,
+        "nodes/done/inputs/message": "Planning completed; no motion sent",
+        "nodes/done/inputs/outputs/validated": {
+          "$ref": "nodes.plan.validated"
+        },
+        "nodes/done/inputs/outputs/plan_ref": {
+          "$ref": "nodes.plan.plan_ref"
+        },
+        "nodes/done/inputs/outputs/nominal_duration_sec": {
+          "$ref": "nodes.plan.nominal_duration_sec"
+        }
+      },
+      "edges": [
+        {
+          "source": "plan",
+          "target": "done"
+        }
+      ]
+    },
+    "right_arm_path_plan.json": {
+      "source": "right_arm_path.json",
+      "nodes": [
+        "path",
+        "point1",
+        "point2",
+        "plan",
+        "done"
+      ],
+      "set": {
+        "name": "right_arm_path_plan",
+        "timeout_sec": 240,
+        "nodes/done/inputs/message": "Planning completed; no motion sent",
+        "nodes/done/inputs/outputs/validated": {
+          "$ref": "nodes.plan.validated"
+        },
+        "nodes/done/inputs/outputs/plan_ref": {
+          "$ref": "nodes.plan.plan_ref"
+        },
+        "nodes/done/inputs/outputs/nominal_duration_sec": {
+          "$ref": "nodes.plan.nominal_duration_sec"
+        }
+      },
+      "edges": [
+        {
+          "source": "path",
+          "target": "point1"
+        },
+        {
+          "source": "point1",
+          "target": "point2"
+        },
+        {
+          "source": "point2",
+          "target": "plan"
+        },
+        {
+          "source": "plan",
+          "target": "done"
+        }
+      ]
+    },
+    "right_obb_grasp_plan.json": {
+      "source": "right_obb_grasp_execute.json",
+      "nodes": [
+        "capture",
+        "perceive",
+        "plan",
+        "valid",
+        "done",
+        "failed"
+      ],
+      "set": {
+        "name": "right_obb_grasp_plan",
+        "max_steps": 8,
+        "timeout_sec": 300,
+        "nodes/done/inputs/message": "Grasp plan generated; no motion executed",
+        "nodes/done/inputs/outputs/plan_ref": {
+          "$ref": "nodes.plan.plan_ref"
+        }
+      },
+      "remove": [
+        "nodes/done/inputs/outputs/grasp_verified",
+        "nodes/done/inputs/outputs/wrist_refined",
+        "nodes/done/inputs/outputs/gripper_stalled"
+      ],
+      "edges": [
+        {
+          "source": "capture",
+          "target": "perceive"
+        },
+        {
+          "source": "perceive",
+          "target": "plan"
+        },
+        {
+          "source": "plan",
+          "target": "valid"
+        },
+        {
+          "source": "valid",
+          "target": "done",
+          "on": "true"
+        },
+        {
+          "source": "valid",
+          "target": "failed",
+          "on": "false"
+        }
+      ]
+    },
+    "right_place_object_plan.json": {
+      "source": "right_place_object.json",
+      "nodes": [
+        "plan",
+        "done"
+      ],
+      "set": {
+        "name": "right_place_object_plan",
+        "timeout_sec": 240,
+        "nodes/done/inputs/message": "Planning completed; no motion sent",
+        "nodes/done/inputs/outputs/validated": {
+          "$ref": "nodes.plan.validated"
+        },
+        "nodes/done/inputs/outputs/plan_ref": {
+          "$ref": "nodes.plan.plan_ref"
+        },
+        "nodes/done/inputs/outputs/nominal_duration_sec": {
+          "$ref": "nodes.plan.nominal_duration_sec"
+        }
+      },
+      "edges": [
+        {
+          "source": "plan",
+          "target": "done"
+        }
+      ]
+    },
+    "right_place_region_plan.json": {
+      "source": "right_place_region.json",
+      "nodes": [
+        "place_capture",
+        "place_region",
+        "place_plan",
+        "done"
+      ],
+      "set": {
+        "name": "right_place_region_plan",
+        "max_steps": 8,
+        "timeout_sec": 300,
+        "nodes/done/inputs/message": "Region and placement planning completed; no motion sent",
+        "nodes/done/inputs/outputs/validated": {
+          "$ref": "nodes.place_plan.validated"
+        },
+        "nodes/done/inputs/outputs/plan_id": {
+          "$ref": "nodes.place_plan.plan_id"
+        },
+        "nodes/done/inputs/outputs/plan_ref": {
+          "$ref": "nodes.place_plan.plan_ref"
+        },
+        "nodes/done/inputs/outputs/region_id": {
+          "$ref": "nodes.place_region.region_id"
+        }
+      },
+      "remove": [
+        "nodes/done/inputs/outputs/placement_verified",
+        "nodes/done/inputs/outputs/placed",
+        "nodes/done/inputs/outputs/retracted"
+      ],
+      "edges": [
+        {
+          "source": "place_capture",
+          "target": "place_region"
+        },
+        {
+          "source": "place_region",
+          "target": "place_plan"
+        },
+        {
+          "source": "place_plan",
+          "target": "done"
+        }
+      ]
+    },
+    "right_pick_place_region_tilt.json": {
+      "source": "right_pick_place_region.json",
+      "nodes": [
+        "capture",
+        "perceive",
+        "plan",
+        "valid",
+        "execute",
+        "failed",
+        "place_valid",
+        "place",
+        "done",
+        "place_failed",
+        "place_capture",
+        "place_region",
+        "place_plan"
+      ],
+      "set": {
+        "name": "right_pick_place_region_tilt",
+        "nodes/place_plan/inputs/skill": "plan_object_placement_with_tilt",
+        "nodes/place_plan/inputs/arguments/max_tilt_deg": 10
+      }
+    },
+    "right_place_region_tilt.json": {
+      "source": "right_place_region.json",
+      "nodes": [
+        "place_capture",
+        "place_region",
+        "place_plan",
+        "place_valid",
+        "place",
+        "done",
+        "place_failed"
+      ],
+      "set": {
+        "name": "right_place_region_tilt",
+        "nodes/place_plan/inputs/skill": "plan_object_placement_with_tilt",
+        "nodes/place_plan/inputs/arguments/max_tilt_deg": 10
+      }
+    },
+    "right_place_region_tilt_plan.json": {
+      "source": "right_place_region_plan.json",
+      "nodes": [
+        "place_capture",
+        "place_region",
+        "place_plan",
+        "done"
+      ],
+      "set": {
+        "name": "right_place_region_tilt_plan",
+        "nodes/place_plan/inputs/skill": "plan_object_placement_with_tilt",
+        "nodes/place_plan/inputs/arguments/max_tilt_deg": 10
+      }
+    }
+  }
+}

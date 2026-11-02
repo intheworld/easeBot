@@ -28,6 +28,7 @@ class PerceptionCache:
     def __init__(self, cache):
         self.cache = cache
         self.depth = None
+        self.depth_history = OrderedDict()
         self.info = None
 
     def depth_image(self, msg):
@@ -49,6 +50,15 @@ class PerceptionCache:
         values.setflags(write=False)
         with self.cache.lock:
             self.depth = Depth(values, stamp, msg.header.frame_id, time.monotonic())
+            self.depth_history[stamp] = self.depth
+            while len(self.depth_history) > 8:
+                self.depth_history.popitem(last=False)
+
+    def depth_for_stamp(self, stamp):
+        """Caller holds cache.lock; exact timestamps only, never nearest-frame pairing."""
+        if self.depth is not None and self.depth.stamp == stamp:
+            return self.depth
+        return self.depth_history.get(stamp)
 
     def camera_info(self, msg):
         values = [*msg.k, *msg.d]
@@ -113,29 +123,36 @@ class CameraSkills:
             frame = self.cache.frame(name)
             if frame is None:
                 raise RuntimeError(f'{name}: no fresh RGB image')
+            depth, info = None, None
+            if name == 'front':
+                # A dropped depth message must not pin capture to a lost RGB
+                # stamp. Prefer the newest fresh exact pair within bounded history.
+                for attempt in range(6):
+                    paired = None
+                    with self.cache.lock:
+                        calibration = self.cache.perception.info
+                        now = time.monotonic()
+                        frames = list(self.cache.front_frames.values())
+                        for candidate in reversed(frames):
+                            sample = self.cache.perception.depth_for_stamp(candidate.stamp)
+                            if (now - candidate.received < 1 and sample is not None
+                                    and now - sample.received < 1 and candidate.frame_id
+                                    and sample.frame_id == candidate.frame_id
+                                    and sample.values.shape == (candidate.height, candidate.width)):
+                                paired = candidate, sample.values
+                                if (calibration is not None and calibration['frame_id'] == candidate.frame_id
+                                        and calibration['width'] == candidate.width
+                                        and calibration['height'] == candidate.height):
+                                    info = calibration
+                                break
+                    if paired is not None:
+                        frame, depth = paired
+                        break
+                    if attempt < 5:
+                        await asyncio.sleep(.02)
             rgb, width, height = frame.data, frame.width, frame.height
             simulated = frame.frame_id.startswith('mock_')
             stamp_sec, frame_id = frame.stamp[0] + frame.stamp[1] * 1e-9, frame.frame_id
-            depth, info = None, None
-            if name == 'front':
-                # Compressed RGB and aligned depth arrive as separate ROS
-                # callbacks. Allow the matching pair to finish arriving.
-                for _ in range(5):
-                    with self.cache.lock:
-                        pending = self.cache.perception.depth
-                        matched = pending is not None and pending.stamp == frame.stamp
-                    if matched:
-                        break
-                    await asyncio.sleep(.02)
-                with self.cache.lock:
-                    sample, calibration = self.cache.perception.depth, self.cache.perception.info
-                    if (sample is not None and sample.stamp == frame.stamp and sample.frame_id == frame_id
-                            and frame_id and time.monotonic() - sample.received < 1
-                            and sample.values.shape == (height, width)):
-                        depth = sample.values
-                        if (calibration is not None and calibration['frame_id'] == frame_id
-                                and calibration['width'] == width and calibration['height'] == height):
-                            info = calibration
         observation_id = uuid.uuid4().hex
         assets = {'rgb': ('image/jpeg', rgb)}
         if depth is not None:
@@ -154,7 +171,10 @@ class CameraSkills:
         while len(self.snapshots) >= 8:
             self.snapshots.popitem(last=False)
         self.snapshots[observation_id] = {'created': time.monotonic(), 'camera': name, 'assets': assets, 'depth': depth,
-                                          'info': info, 'simulated': simulated}
+                                          'info': info, 'simulated': simulated,
+                                          'received': time.monotonic() if self.simulated else frame.received,
+                                          'stamp_sec': stamp_sec, 'frame_id': frame_id,
+                                          'width': width, 'height': height}
         ref = f'mhs-observation:{observation_id}/'
         return {'observation_id': observation_id, 'camera': name, 'width': width, 'height': height,
                 'rgb_ref': ref + 'rgb', 'depth_ref': ref + 'depth' if depth is not None else '',

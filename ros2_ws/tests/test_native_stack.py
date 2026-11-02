@@ -18,7 +18,6 @@ from rclpy.action import ActionClient
 from rclpy.qos import qos_profile_sensor_data
 from controller_manager_msgs.srv import ListControllers, SwitchController
 from control_msgs.action import FollowJointTrajectory
-from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import TwistStamped
 from lifecycle_msgs.msg import State, Transition
 from lifecycle_msgs.srv import ChangeState, GetState

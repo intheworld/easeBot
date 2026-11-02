@@ -1,0 +1,60 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_gripper_observation",
+  "entry": "observe",
+  "max_steps": 2,
+  "timeout_sec": 75,
+  "nodes": [
+    {
+      "id": "observe",
+      "kind": "skill",
+      "timeout_sec": 65,
+      "inputs": {
+        "skill": "observe_gripper",
+        "arguments": {
+          "side": "right"
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Fresh sensor evidence only; no motion sent",
+        "outputs": {
+          "jaw_state": {
+            "$ref": "nodes.observe.jaw_state"
+          },
+          "gap_m": {
+            "$ref": "nodes.observe.gap_m"
+          },
+          "wrist_state": {
+            "$ref": "nodes.observe.wrist_state"
+          },
+          "object_visible": {
+            "$ref": "nodes.observe.object_visible"
+          },
+          "observation_id": {
+            "$ref": "nodes.observe.observation_id"
+          },
+          "model_present": {
+            "$ref": "nodes.observe.model_present"
+          },
+          "physical_capture_verified": {
+            "$ref": "nodes.observe.physical_capture_verified"
+          },
+          "holding_state": {
+            "$ref": "nodes.observe.holding_state"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "observe",
+      "target": "done"
+    }
+  ]
+}

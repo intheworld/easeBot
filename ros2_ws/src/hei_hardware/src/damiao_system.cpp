@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <iomanip>
+#include <sstream>
 #include <set>
 #include <stdexcept>
 #include <thread>
@@ -427,20 +429,46 @@ Result DamiaoSystem::write(const rclcpp::Time &, const rclcpp::Duration &)
     // Validate the entire batch before sending any movement command.
     for (auto & m : motors_) {
       if (!m.claimed) { continue; }
-      const bool outside = m.command < m.minimum || m.command > m.maximum;
-      // An arm may start outside the reference command range. Preserve its
-      // measured hold target and allow interpolation back into the range,
-      // without allowing targets farther outside. Retire this on entry.
-      const bool startup_hold = !m.gripper && m.command_interface == "position" &&
-        std::isfinite(m.startup_hold) &&
-        m.command >= std::min(m.minimum, m.startup_hold) &&
-        m.command <= std::max(m.maximum, m.startup_hold);
-      if (!fresh(m) || m.mode_changed || Clock::now() - m.mode_received > feedback_timeout_ ||
-        m.mode != m.expected_mode ||
-        !std::isfinite(m.command) || (outside && !startup_hold)) {
-        return fail(m.name + ": stale feedback or invalid/out-of-limit command");
+      const auto now = Clock::now();
+      if (!fresh(m)) {
+        return fail(m.name + ": command blocked by feedback timeout: age_ms=" +
+          std::to_string(std::chrono::duration<double, std::milli>(now - m.received).count()));
       }
-      if (!outside) { m.startup_hold = NaN; }
+      if (m.mode_changed || m.mode != m.expected_mode) {
+        return fail(m.name + ": command blocked by CTRL_MODE mismatch: actual=" +
+          std::to_string(m.mode) + ", expected=" + std::to_string(m.expected_mode) +
+          ", mode_changed=" + std::to_string(m.mode_changed));
+      }
+      if (now - m.mode_received > feedback_timeout_) {
+        return fail(m.name + ": command blocked by CTRL_MODE feedback timeout: age_ms=" +
+          std::to_string(std::chrono::duration<double, std::milli>(now - m.mode_received).count()));
+      }
+      if (!std::isfinite(m.command)) {
+        return fail(m.name + ": non-finite command");
+      }
+      // Preserve the measured startup hold interval until a target has entered
+      // the configured range. Do not extend that interval for a new target.
+      const bool startup_hold = !m.gripper && m.command_interface == "position" &&
+        std::isfinite(m.startup_hold);
+      const double lower = startup_hold ? std::min(m.minimum, m.startup_hold) : m.minimum;
+      const double upper = startup_hold ? std::max(m.maximum, m.startup_hold) : m.maximum;
+      if (m.command < lower || m.command > upper) {
+        // Quintic interpolation can cross an exact endpoint by floating-point
+        // roundoff. 1e-9 rad is far below one encoder count; clamp only this
+        // numerical error, never a meaningful target or a velocity command.
+        constexpr double position_roundoff = 1e-9;
+        const double bounded = std::clamp(m.command, lower, upper);
+        if (m.command_interface == "position" && std::abs(m.command - bounded) <= position_roundoff) {
+          m.command = bounded;
+        } else {
+          std::ostringstream detail;
+          detail << std::setprecision(17) << m.name << ": command outside permitted range: command="
+                 << m.command << ", range=[" << lower << ", " << upper << "]"
+                 << ", position_roundoff_rad=" << position_roundoff;
+          return fail(detail.str());
+        }
+      }
+      if (m.command >= m.minimum && m.command <= m.maximum) { m.startup_hold = NaN; }
       if (m.gripper && (!std::isfinite(m.speed_command) || m.speed_command < 0.01 || m.speed_command > m.speed ||
         !std::isfinite(m.current_command) || m.current_command < 0.0001 || m.current_command > m.current_limit ||
         (m.enable_command != 0 && m.enable_command != 1))) {

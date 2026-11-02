@@ -1,0 +1,95 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_arm_offset",
+  "entry": "plan",
+  "max_steps": 32,
+  "timeout_sec": 450,
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "skill",
+      "timeout_sec": 95,
+      "inputs": {
+        "skill": "plan_arm_offset",
+        "arguments": {
+          "side": "right",
+          "frame_id": {
+            "$ref": "inputs.frame_id"
+          },
+          "dx_m": {
+            "$ref": "inputs.dx_m"
+          },
+          "dy_m": {
+            "$ref": "inputs.dy_m"
+          },
+          "dz_m": {
+            "$ref": "inputs.dz_m"
+          }
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "kind": "skill",
+      "timeout_sec": 305,
+      "inputs": {
+        "skill": "execute_arm_plan",
+        "arguments": {
+          "plan_id": {
+            "$ref": "nodes.plan.plan_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "valid",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.plan.validated"
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "outputs": {}
+      }
+    },
+    {
+      "id": "failed",
+      "kind": "end",
+      "inputs": {
+        "status": "failed",
+        "message": "Path validation failed; no motion executed",
+        "outputs": {
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "plan",
+      "target": "valid"
+    },
+    {
+      "source": "valid",
+      "target": "execute",
+      "on": "true"
+    },
+    {
+      "source": "valid",
+      "target": "failed",
+      "on": "false"
+    },
+    {
+      "source": "execute",
+      "target": "done"
+    }
+  ]
+}

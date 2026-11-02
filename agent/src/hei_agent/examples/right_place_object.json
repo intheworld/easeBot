@@ -1,0 +1,104 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_place_object",
+  "entry": "plan",
+  "max_steps": 32,
+  "timeout_sec": 900,
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "skill",
+      "timeout_sec": 185,
+      "inputs": {
+        "skill": "plan_place_object",
+        "arguments": {
+          "side": "right",
+          "frame_id": {
+            "$ref": "inputs.frame_id"
+          },
+          "x_m": {
+            "$ref": "inputs.x_m"
+          },
+          "y_m": {
+            "$ref": "inputs.y_m"
+          },
+          "support_z_m": {
+            "$ref": "inputs.support_z_m"
+          },
+          "approach_height_m": {
+            "$ref": "inputs.approach_height_m"
+          },
+          "retreat_height_m": {
+            "$ref": "inputs.retreat_height_m"
+          },
+          "release_gap_m": {
+            "$ref": "inputs.release_gap_m"
+          }
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "kind": "skill",
+      "timeout_sec": 605,
+      "inputs": {
+        "skill": "execute_place_plan",
+        "arguments": {
+          "plan_id": {
+            "$ref": "nodes.plan.plan_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "valid",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.plan.validated"
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "outputs": {}
+      }
+    },
+    {
+      "id": "failed",
+      "kind": "end",
+      "inputs": {
+        "status": "failed",
+        "message": "Path validation failed; no motion executed",
+        "outputs": {
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "plan",
+      "target": "valid"
+    },
+    {
+      "source": "valid",
+      "target": "execute",
+      "on": "true"
+    },
+    {
+      "source": "valid",
+      "target": "failed",
+      "on": "false"
+    },
+    {
+      "source": "execute",
+      "target": "done"
+    }
+  ]
+}

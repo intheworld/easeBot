@@ -1,7 +1,6 @@
 """One real controller_manager + one DamiaoSystem + seven PTY motors; no hardware."""
 import os
 import math
-from pathlib import Path
 import signal
 import struct
 import subprocess

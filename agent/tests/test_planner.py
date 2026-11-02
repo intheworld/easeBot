@@ -197,7 +197,7 @@ def test_catalog_declared_long_grasp_timeouts_and_examples():
                   {'plan_id':text,'plan_ref':text,'validated':boolean,'validation_status':text},
                   timeout_sec=180,outcomes=('success','failure')),
         SkillSpec('execute_right_grasp', 'execute', {'plan_id':text},
-                  {'grasp_verified':boolean, 'gripper_stalled':boolean}, motion=True, timeout_sec=300, outcomes=('success','failure')),
+                  {'grasp_verified':boolean, 'gripper_stalled':boolean, 'wrist_refined':boolean}, motion=True, timeout_sec=300, outcomes=('success','failure')),
     ])
     for name in ('right_object_obb.json','right_obb_grasp_plan.json','right_obb_grasp_execute.json'):
         graph = Graph.load(root / 'agent/src/hei_agent/examples' / name)

@@ -12,11 +12,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--python', dest='python_path', default='~/miniconda3/envs/rebotarm/bin/python')
     parser.add_argument('--model', default='~/gitdir/rebot_grasp/models/yoloe-26s-seg.pt')
+    parser.add_argument('--install-collision', action='store_true', help='Install pinned online collision dependency into the chosen compute Python')
     parser.add_argument('--arm-only', action='store_true', help='Check IK/collision dependencies without detector or weights')
     args = parser.parse_args()
-    python = Path(args.python_path).expanduser().resolve(strict=True)
+    python = Path(args.python_path).expanduser().absolute()
     model = None if args.arm_only else Path(args.model).expanduser().resolve(strict=True)
-    modules = 'numpy, scipy, cv2, mujoco' + ('' if args.arm_only else ', ultralytics')
+    if args.install_collision:
+        subprocess.run([str(python), '-m', 'pip', 'install', '--no-deps', 'python-fcl==0.7.0.11'], check=True)
+    modules = 'numpy, scipy, cv2, fcl' + ('' if args.arm_only else ', ultralytics')
     subprocess.run([str(python), '-c',
         'import json, ' + modules + '; '
         'print(json.dumps({m.__name__: m.__version__ for m in (' + modules + ')}))'],

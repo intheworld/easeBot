@@ -1,4 +1,7 @@
 """Publish the robot-owned skill catalog and guarded calls through MHS."""
+import asyncio
+import logging
+
 from agnes_mhs import CallError, errors
 
 from .discovery import DiscoveryDevice as Device
@@ -15,17 +18,20 @@ class SkillDevice(ObserverDevice):
         else:
             from .ros_skills import RosSkillBackend
             backend = RosSkillBackend(node, config)
+        self._warmup_task=None
         self.cameras = CameraSkills(cache, simulated=config['backend'] == 'mock')
+        from .arm.payload import CarryState
+        self.carry = CarryState()
         self.grasp = None
         if 'right_grasp' in config:
             from .grasp.service import GraspSkills, prepare_config
-            self.grasp = GraspSkills(prepare_config(config['right_grasp']), self.cameras, backend)
+            self.grasp = GraspSkills(prepare_config(config['right_grasp']), self.cameras, backend, carry=self.carry)
         self.arm_motion = None
         if 'arm_motion' in config or self.grasp is not None:
             from .arm.service import ArmMotionSkills, prepare_config as prepare_arm_config
-            inherited = ({key:self.grasp.profile[key] for key in ('worker_python','joint_speed_rad_s','scene')}
+            inherited = ({key:self.grasp.profile[key] for key in ('worker_python','joint_speed_rad_s','scene','gap_per_motor_rad_m')}
                          if self.grasp is not None else {})
-            self.arm_motion = ArmMotionSkills(prepare_arm_config({**inherited, **config.get('arm_motion',{})}), backend)
+            self.arm_motion = ArmMotionSkills(prepare_arm_config({**inherited, **config.get('arm_motion',{})}), backend, carry=self.carry, region_perception=self.grasp)
         self.skills = SkillSet(config, backend, cameras=self.cameras, grasp=self.grasp, arm=self.arm_motion)
         device = Device(device_id, 'robot', name='HEI skill set', model='HEI ROS 2 ' + config['backend'],
                         mobile=False, localization='none', resources={'manipulation': 'reject'},
@@ -33,6 +39,7 @@ class SkillDevice(ObserverDevice):
                             'mode': 'string', 'backend': 'string', 'valid': 'boolean',
                             'enabled': 'boolean', 'read_only': 'boolean', 'sample_id': 'integer',
                             'stop_scope': 'string', 'skill_revision': 'string', 'skills_blocked': 'boolean',
+                            'carry_status':'string','carried_object_id':'string','placed_object_count':'integer',
                         }.items()})
         super().__init__(cache, device_id, device=device)
         device.on_stop = self.stop
@@ -55,6 +62,11 @@ class SkillDevice(ObserverDevice):
             except (ValueError, RuntimeError) as exc:
                 raise CallError('invalid', str(exc)) from exc
 
+        @device.tool('Read compute worker warmup progress, process liveness and initialization timings. No motion.',
+                     name='get_compute_status', timeout=3, read_only=True)
+        async def compute_status(call):
+            return {'data': self.compute_status()}
+
         parameters = {'invocation_id': {'type': 'string', 'maxLength': 128}}
 
         @device.tool('Read one local execution, including termination confirmation.', timeout=3,
@@ -75,6 +87,35 @@ class SkillDevice(ObserverDevice):
         problems = errors('RegisterParams', device.description())
         if problems:
             raise ValueError('Invalid skill device registration: ' + '; '.join(problems))
+
+    def compute_status(self):
+        result={}
+        for name,runtime in (('arm',self.arm_motion),('grasp',self.grasp)):
+            if runtime is None:continue
+            process=runtime._compute_process
+            running=process is not None and process.returncode is None
+            status=dict(getattr(runtime,'warmup_status',{'status':'not_started'}))
+            status.update(worker_running=running,pid=process.pid if running else None)
+            if status['status']=='ready' and (not running or runtime.warmup_status.get('pid')!=process.pid):
+                status['status']='cold'
+            result[name]=status
+        return result
+
+    def start(self):
+        if self._warmup_task is None:
+            self._warmup_task=asyncio.create_task(self._warm_compute(),name='skill-compute-warmup')
+
+    async def _warm_compute(self):
+        logger=logging.getLogger('hei_agent_bridge.compute')
+        # Serialize startup work to avoid competing CUDA initialization on Jetson.
+        for name,runtime in (('arm',self.arm_motion),('grasp',self.grasp)):
+            if runtime is None:continue
+            logger.info('%s compute warmup starting',name)
+            try:
+                status=await runtime.warmup()
+                logger.info('%s compute warmup %s (%.2fs)',name,status['status'],status.get('elapsed_sec',0.))
+            except Exception:
+                logger.exception('%s compute warmup failed; see get_compute_status',name)
 
     def _register(self, definition):
         params = {**{key: {field: value for field, value in spec.items() if field != 'unit'}
@@ -98,8 +139,12 @@ class SkillDevice(ObserverDevice):
 
     def snapshot(self):
         snapshot = self.cache.snapshot()
+        if self.skills.motion_owner is None:
+            try:self.carry.observe(self.skills.backend.arm_scene_state())
+            except (AttributeError,RuntimeError,ValueError):pass
         ready = self.skills.backend.ready() and not self.skills.blocked
-        snapshot.update(backend=self.skills.config['backend'], read_only=self.skills.config['backend'] == 'mock',
+        snapshot.update(carry_status=self.carry.status,carried_object_id=(self.carry.payload or {}).get('id',''),
+                        placed_object_count=len(self.carry.obstacles),backend=self.skills.config['backend'], read_only=self.skills.config['backend'] == 'mock',
                         valid=ready, stop_scope='skill_owned_actions_only',
                         mode='SKILLS_BLOCKED' if self.skills.blocked else 'SKILLS_READY' if ready else 'SKILLS_WAITING',
                         fault='Skill termination unconfirmed; motion blocked' if self.skills.blocked else
@@ -108,10 +153,19 @@ class SkillDevice(ObserverDevice):
 
     def refresh(self):
         super().refresh()
-        self.device.update(skill_revision=self.skills.revision, skills_blocked=self.skills.blocked)
+        self.device.update(skill_revision=self.skills.revision, skills_blocked=self.skills.blocked,
+                           carry_status=self.carry.status,carried_object_id=(self.carry.payload or {}).get('id',''),
+                           placed_object_count=len(self.carry.obstacles))
 
     async def stop(self):
         await self.skills.stop()
+        if self._warmup_task is not None:
+            self._warmup_task.cancel()
+            await asyncio.gather(self._warmup_task,return_exceptions=True)
+            self._warmup_task=None
+        for runtime in (self.grasp, self.arm_motion):
+            if runtime is not None:
+                await runtime.close_worker()
 
     def close(self):
         close = getattr(self.skills.backend, 'close', None)

@@ -4,7 +4,6 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import sys
-import time
 
 import numpy as np
 import pytest
@@ -160,8 +159,12 @@ def test_cancel_and_scene_guard_cancel_only_owned_goal(tmp_path,cause):
         elif cause in ('left','wheels'):backend.state[cause][0]+=.1
         else:backend.state[cause]+=.1
         result=await task
-        assert result['status']==('cancelled' if cause=='cancel' else 'failed'),result
-        assert result['cleanup_complete'] and backend.cancelled==['motion']
+        if cause == 'left':
+            assert result['status'] == 'succeeded', result
+            assert result['cleanup_complete'] and not backend.cancelled
+        else:
+            assert result['status']==('cancelled' if cause=='cancel' else 'failed'),result
+            assert result['cleanup_complete'] and backend.cancelled==['motion']
         assert service.plans[id]['consumed']
     asyncio.run(run())
 
@@ -187,7 +190,7 @@ def test_arm_catalog_and_packaged_graphs_match(tmp_path):
     service,skills,_=make_arm_service(tmp_path)
     catalog=SkillCatalog.from_manifest(skills.manifest())
     assert {'get_arm_pose','plan_arm_pose','plan_arm_position','execute_arm_plan'} <= {s['name'] for s in catalog.describe()}
-    for name in ('arm_pose.json','arm_position_plan.json','arm_position_execute.json'):
+    for name in ('arm_pose.json','arm_position_plan.json','arm_position_execute.json','right_arm_home.json','right_arm_home_plan.json'):
         validate_plan(Graph.load(ROOT/'agent/src/hei_agent/examples'/name),{},catalog)
 
 
@@ -215,3 +218,52 @@ def test_arm_profile_does_not_need_yolo_or_hand_eye(tmp_path,monkeypatch):
     prepared=module.prepare_config({})
     assert 'model_path' not in prepared and 'calibration' not in prepared
     ArmMotionSkills(prepared,ArmBackend(),directory=tmp_path/'plans',urdf=URDF)
+
+
+def test_home_plans_exact_zero_then_executes_without_changing_grippers(tmp_path):
+    async def run():
+        service,skills,backend=make_arm_service(tmp_path)
+        before=deepcopy(backend.state)
+        result=await call(skills,'plan_arm_home',{'side':'right'},'home-plan')
+        assert result['status']=='succeeded',result
+        assert not backend.calls
+        id=result['outputs']['plan_id']
+        plan=service.plans[id]['data']['plan']
+        np.testing.assert_array_equal(plan['waypoints_rad'][-1],np.zeros(6))
+        np.testing.assert_allclose(plan['T_goal'],service.fk(np.zeros(6)))
+        result=await call(skills,'execute_arm_plan',{'plan_id':id},'home-execute')
+        assert result['status']=='succeeded',result
+        assert result['outputs']['joint_error_rad']==0
+        assert backend.state['right']==[0.]*6
+        assert backend.state['left']==before['left']
+        assert backend.state['right_gripper']==before['right_gripper']
+        replay=await call(skills,'execute_arm_plan',{'plan_id':id},'home-replay')
+        assert replay['status']=='failed' and len(backend.calls)==1
+    asyncio.run(run())
+
+
+def test_home_collision_failure_does_not_dispatch(tmp_path):
+    async def run():
+        service,skills,backend=make_arm_service(tmp_path)
+        worker=service._worker
+        async def blocked(directory):
+            data=await worker(directory);data['validation']['status']='failed';return data
+        service._worker=blocked
+        result=await call(skills,'plan_arm_home',{'side':'right'},'home-plan')
+        assert result['status']=='succeeded' and not result['outputs']['validated']
+        result=await call(skills,'execute_arm_plan',{'plan_id':result['outputs']['plan_id']},'home-execute')
+        assert result['status']=='failed' and not backend.calls
+    asyncio.run(run())
+
+
+def test_home_verifies_measured_joint_endpoint(tmp_path):
+    async def run():
+        service,skills,backend=make_arm_service(tmp_path)
+        result=await call(skills,'plan_arm_home',{'side':'right'},'home-plan')
+        async def undershoot(invocation,start,waypoints,speed):
+            backend.calls.append(('arm',invocation,waypoints))
+            backend.state['right']=[0.,0.,0.,0.,0.,.04]
+        backend.arm_trajectory=undershoot
+        result=await call(skills,'execute_arm_plan',{'plan_id':result['outputs']['plan_id']},'home-execute')
+        assert result['status']=='failed' and 'joint_error' in result['message']
+    asyncio.run(run())

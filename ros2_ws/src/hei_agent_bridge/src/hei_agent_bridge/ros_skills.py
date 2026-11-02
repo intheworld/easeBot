@@ -6,6 +6,7 @@ import math
 import threading
 import time
 from copy import deepcopy
+from .joint_history import JointHistory
 
 
 async def ros_future(future):
@@ -39,6 +40,10 @@ class RosSkillBackend:
         self.samples, self.stamps, self.lock = {}, {}, threading.Lock()
         self.operations = {}
         self.wheel_history = {}
+        self.gripper_contact_history = deque(maxlen=256)
+        self.gripper_contact_sequence = None
+        self.gripper_closure = None
+        self.right_joint_history=JointHistory()
         self.arm = {side: ActionClient(node, FollowJointTrajectory,
                     f'{side}_arm_controller/follow_joint_trajectory') for side in config['named_poses']
                     if config['named_poses'][side]}
@@ -47,7 +52,7 @@ class RosSkillBackend:
         self.grippers = {side: ActionClient(node, GripperCommand,
                         f'{side}_gripper_controller/gripper_cmd') for side in ('left', 'right')}
         self.grasp_parameters = None
-        if 'right_grasp' in config:
+        if 'right_grasp' in config or 'arm_motion' in config:
             from rcl_interfaces.srv import GetParameters
             self.grasp_parameters = node.create_client(GetParameters, 'right_gripper_controller/get_parameters')
         self.subscriptions = []
@@ -63,6 +68,7 @@ class RosSkillBackend:
             if self.stamps.get(key) == stamp:
                 return
             self.stamps[key] = stamp
+            values=list(values)
             for name, position, velocity in values:
                 if math.isfinite(position) and math.isfinite(velocity):
                     now = time.monotonic()
@@ -73,6 +79,19 @@ class RosSkillBackend:
                         while history and now-history[0][0] > .75:
                             history.popleft()
 
+            positions={name:p for name,p,v in values if math.isfinite(p) and math.isfinite(v)}
+            if all(name in positions for name in self.joints('right')):
+                if not hasattr(self,'right_joint_history'):self.right_joint_history=JointHistory()
+                self.right_joint_history.append(stamp[0]+stamp[1]*1e-9,
+                    [positions[name] for name in self.joints('right')],time.monotonic())
+
+    def wrist_joint_window(self,duration):
+        with self.lock:return self.right_joint_history.window(duration)
+
+    def wrist_joint_state(self,stamp_sec,*,max_skew_sec,max_span_rad):
+        with self.lock:
+            return self.right_joint_history.at(stamp_sec,max_skew_sec=max_skew_sec,max_span_rad=max_span_rad)
+
     def _joints(self, msg, key):
         if len(msg.name) != len(msg.position) or len(msg.name) != len(msg.velocity):
             return
@@ -82,6 +101,15 @@ class RosSkillBackend:
         values = []
         for name, interfaces in zip(msg.joint_names, msg.interface_values):
             state = dict(zip(interfaces.interface_names, interfaces.values))
+            if name=='right_gripper_motor':
+                with self.lock:
+                    if not hasattr(self,'gripper_contact_history'):
+                        self.gripper_contact_history=deque(maxlen=256);self.gripper_contact_sequence=None
+                    seq=state.get('feedback_sequence')
+                    if seq is not None and seq!=self.gripper_contact_sequence:
+                        self.gripper_contact_sequence=seq
+                        self.gripper_contact_history.append((time.monotonic(),*[state.get(k,float('nan')) for k in
+                            ('position','velocity','effort','enabled')]))
             if 'position' in state and 'velocity' in state:
                 values.append((name, state['position'], state['velocity']))
         self._update('dynamic_' + key, (msg.header.stamp.sec, msg.header.stamp.nanosec), values)
@@ -147,6 +175,7 @@ class RosSkillBackend:
         self.operations.pop(invocation, None)
 
     async def gripper(self, invocation, side, gap):
+        if side=='right':self.gripper_closure=None
         from control_msgs.action import GripperCommand
         names = [f'{side}_gripper_motor']
         goal = GripperCommand.Goal()
@@ -221,11 +250,29 @@ class RosSkillBackend:
                     raise RuntimeError(f'Fresh grasp scene feedback unavailable: {key}')
                 if key == 'wheels':
                     self._wheel_rest_locked(names, now)
-                elif (at_rest or key not in ('right', 'right_gripper')) and any(abs(v[1]) > .05 for v in samples):
+                elif key not in ('left', 'left_gripper') and (at_rest or key not in ('right', 'right_gripper')) and any(abs(v[1]) > .05 for v in samples):
                     raise RuntimeError(f'Grasp scene is moving: {key}')
                 values = [v[0] for v in samples]
                 result[key] = values[0] if len(values) == 1 else values
         return result
+
+    def gripper_position(self):
+        with self.lock:
+            sample=self.samples.get('right_gripper_motor')
+            if sample is None or time.monotonic()-sample[2]>.2:
+                raise RuntimeError('Fresh right-gripper position feedback unavailable')
+            return sample[0]
+
+    def gripper_contact(self, profile):
+        from .grasp.contact import contact_evidence
+        with self.lock:
+            closure=getattr(self,'gripper_closure',None)
+            if closure is None:
+                return dict(physical_capture_verified=False,contact_state='no_completed_closure',torque_nm=0.)
+            scale=abs(profile['gap_per_motor_rad_m'])
+            return contact_evidence([r for r in self.gripper_contact_history if r[0]>=closure['started']],
+                now=time.monotonic(),closed_gap_m=closure['gap_m'],
+                open_gap_m=-profile['gripper_open_rad']*scale,gap_per_rad=scale)
 
     async def grasp_trajectory(self, invocation, start, waypoints, speed):
         await self.arm_trajectory(invocation,start,waypoints,speed)
@@ -253,6 +300,8 @@ class RosSkillBackend:
     async def grasp_gripper(self, invocation, gap, *, close):
         from control_msgs.action import GripperCommand
         names = ['right_gripper_motor']
+        self.gripper_closure=None
+        closure_started=time.monotonic()
         goal = GripperCommand.Goal()
         goal.command.position, goal.command.max_effort = float(gap), 0.0
         result = await self._execute(invocation, self.grippers['right'], goal, names)
@@ -262,6 +311,7 @@ class RosSkillBackend:
             raise RuntimeError('Invalid grasp gripper gap feedback')
         await self._verify(names)
         self.operations.pop(invocation, None)
+        if close:self.gripper_closure=dict(gap_m=float(gap),started=closure_started)
         return bool(result.stalled)
 
     async def cancel(self, invocation):

@@ -1,0 +1,47 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_carry_state",
+  "entry": "state",
+  "max_steps": 2,
+  "timeout_sec": 10,
+  "nodes": [
+    {
+      "id": "state",
+      "kind": "skill",
+      "inputs": {
+        "skill": "get_carried_object",
+        "arguments": {}
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "outputs": {
+          "status": {
+            "$ref": "nodes.state.status"
+          },
+          "payload_id": {
+            "$ref": "nodes.state.payload_id"
+          },
+          "reason": {
+            "$ref": "nodes.state.reason"
+          },
+          "placed_count": {
+            "$ref": "nodes.state.placed_count"
+          },
+          "physical_capture_verified": {
+            "$ref": "nodes.state.physical_capture_verified"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "state",
+      "target": "done"
+    }
+  ]
+}

@@ -531,3 +531,55 @@ TEST(Damiao, OptionalModeSetupRequiresReadback)
   EXPECT_FALSE(adapter.enabled);
   EXPECT_EQ(adapter.specials(0xfc), 0u);
 }
+
+
+TEST(Damiao, PositionEndpointRoundoffIsClampedWithoutStoppingController)
+{
+  for (const bool upper_zero : {false, true}) {
+    Adapter adapter;
+    auto p = parameters(adapter.path, false);
+    p.hardware_info.joints[0].command_interfaces[0].min = upper_zero ? "-1" : "0";
+    p.hardware_info.joints[0].command_interfaces[0].max = upper_zero ? "0" : "1";
+    DamiaoSystem system;
+    ASSERT_EQ(system.on_init(p), Callback::SUCCESS);
+    auto commands = system.export_command_interfaces();
+    ASSERT_EQ(system.on_configure(rclcpp_lifecycle::State{}), Callback::SUCCESS);
+    ASSERT_EQ(system.on_activate(rclcpp_lifecycle::State{}), Callback::SUCCESS);
+    ASSERT_EQ(system.perform_command_mode_switch({"motor_joint/position"}, {}), Result::OK);
+    settle(system);
+    // First reach the legal endpoint, retiring any startup hold exception.
+    ASSERT_TRUE(commands[0].set_value(0.0));
+    ASSERT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 0)), Result::OK);
+    for (double error : {std::nextafter(0.0, 1.0), 1e-14, 1e-10}) {
+      ASSERT_TRUE(commands[0].set_value(upper_zero ? error : -error));
+      ASSERT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 0)), Result::OK);
+      EXPECT_DOUBLE_EQ(commands[0].get_optional().value(), 0);
+    }
+    std::this_thread::sleep_for(5ms);
+    EXPECT_TRUE(adapter.enabled);
+    EXPECT_EQ(adapter.specials(0xfd), 0u);
+    bool zero_command = false;
+    for (const auto & frame : adapter.sent()) {
+      zero_command |= frame.id == 0x101 && frame.data == dm::position_velocity(1, 0, .1).data;
+    }
+    EXPECT_TRUE(zero_command);
+    // This is no longer floating-point roundoff: do not silently clamp it.
+    ASSERT_TRUE(commands[0].set_value(upper_zero ? 1e-6 : -1e-6));
+    EXPECT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 0)), Result::ERROR);
+  }
+}
+
+TEST(Damiao, PositionRoundoffDoesNotRelaxVelocityLimits)
+{
+  Adapter adapter;
+  adapter.mode = 3;
+  DamiaoSystem system;
+  ASSERT_EQ(system.on_init(parameters(adapter.path, false, "velocity")), Callback::SUCCESS);
+  auto commands = system.export_command_interfaces();
+  ASSERT_EQ(system.on_configure(rclcpp_lifecycle::State{}), Callback::SUCCESS);
+  ASSERT_EQ(system.on_activate(rclcpp_lifecycle::State{}), Callback::SUCCESS);
+  ASSERT_EQ(system.perform_command_mode_switch({"motor_joint/velocity"}, {}), Result::OK);
+  settle(system);
+  ASSERT_TRUE(commands[0].set_value(.1 + 1e-12));
+  EXPECT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 0)), Result::ERROR);
+}

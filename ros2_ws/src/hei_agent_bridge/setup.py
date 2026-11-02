@@ -6,7 +6,7 @@ setup(
     packages=find_packages(where='src'), package_dir={'': 'src'},
     data_files=[('share/ament_index/resource_index/packages', ['resource/hei_agent_bridge']),
                 ('share/hei_agent_bridge', ['package.xml', 'README.md', 'sdk-revision.txt', 'requirements-mhs.lock']),
-                ('share/hei_agent_bridge/config', glob('config/*.json') + glob('config/*.npz'))],
+                ('share/hei_agent_bridge/config', glob('config/*.json') + glob('config/*.npz') + glob('config/*.json.example'))],
     install_requires=['setuptools'], zip_safe=False,
     maintainer='easeBot maintainers', maintainer_email='maintainers@example.invalid',
     description='HEI ROS 2 observation and explicit skill set bridge to Agnes MHS/MOS', license='Apache-2.0',

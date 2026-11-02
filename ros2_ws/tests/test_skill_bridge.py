@@ -372,3 +372,85 @@ def test_real_mhs_device_catalog_graph_and_gripper(monkeypatch, tmp_path):
                 await asyncio.gather(*tasks, return_exceptions=True)
 
     asyncio.run(exercise())
+
+
+def test_transport_catalog_registers_through_real_mhs_schema(tmp_path,monkeypatch):
+    from test_arm_motion import ArmBackend
+    from test_grasp_skills import make_service
+    from hei_agent_bridge import ros_skills
+    from hei_agent_bridge.grasp import service as grasp_module
+    profile_service,_,_,_=make_service(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    backend=ArmBackend()
+    monkeypatch.setattr(ros_skills,'RosSkillBackend',lambda node,config:backend)
+    monkeypatch.setattr(grasp_module,'prepare_config',lambda overrides:profile_service.profile)
+    from hei_agent_bridge.arm import service as arm_module
+    grasp_factory=grasp_module.GraspSkills;arm_factory=arm_module.ArmMotionSkills
+    urdf=ROOT/'ros2_ws/src/hei_description/urdf/hei_body.urdf'
+    monkeypatch.setattr(grasp_module,'GraspSkills',lambda profile,cameras,backend,carry:grasp_factory(profile,cameras,backend,carry=carry,urdf=urdf))
+    monkeypatch.setattr(arm_module,'ArmMotionSkills',lambda profile,backend,carry,region_perception=None:arm_factory(profile,backend,carry=carry,urdf=urdf,region_perception=region_perception))
+    monkeypatch.setattr(arm_module,'data_directory',lambda:ROOT/'ros2_ws/src/hei_agent_bridge/config')
+    device=SkillDevice(RobotCache(),'transport-test',dict(backend='ros',named_poses={},gripper_max_gap_m=.1,right_grasp={}),None)
+    assert device.grasp.carry is device.arm_motion.carry
+    assert not errors('RegisterParams',device.device.description())
+    tools={tool['name'] for tool in device.device.description()['tools']}
+    assert {'plan_arm_offset','plan_arm_path','plan_place_object','execute_place_plan','get_carried_object','create_place_region','perceive_place_region','plan_object_placement'}<=tools
+
+
+def test_startup_warmup_is_serial_observable_and_cancelled_on_stop():
+    from types import SimpleNamespace
+    async def exercise():
+        device=SkillDevice.__new__(SkillDevice)
+        device._warmup_task=None
+        events=[];entered=asyncio.Event();blocked=asyncio.Event()
+        class Runtime:
+            def __init__(self,name):
+                self.name=name;self._compute_process=None;self.warmup_status={'status':'not_started'}
+            async def warmup(self):
+                events.append(self.name)
+                self.warmup_status={'status':'warming'}
+                if self.name=='grasp':entered.set();await blocked.wait()
+                self._compute_process=SimpleNamespace(pid=42,returncode=None)
+                self.warmup_status={'status':'ready','pid':42}
+                return self.warmup_status
+            async def close_worker(self):events.append('close_'+self.name);self._compute_process=None
+        device.arm_motion=Runtime('arm');device.grasp=Runtime('grasp')
+        async def stop():events.append('stop_skills')
+        device.skills=SimpleNamespace(stop=stop)
+        device.start();task=device._warmup_task;device.start()
+        assert device._warmup_task is task
+        await asyncio.wait_for(entered.wait(),3)
+        assert events==['arm','grasp']
+        assert device.compute_status()['arm']['status']=='ready'
+        assert device.compute_status()['grasp']['status']=='warming'
+        device.arm_motion._compute_process.pid=43
+        assert device.compute_status()['arm']['status']=='cold'
+        await device.stop()
+        assert task.done() and events[-3:]==['stop_skills','close_grasp','close_arm']
+    asyncio.run(exercise())
+
+
+def test_partial_failure_evidence_survives_mhs_without_becoming_success(monkeypatch):
+    from hei_agent_bridge.skills import SkillFailure
+    monkeypatch.setenv('NO_PROXY','127.0.0.1,localhost')
+    async def run():
+        async with EmbeddedHub('127.0.0.1',0,device_id='partial-test') as hub:
+            device=SkillDevice(RobotCache(),'partial-test',
+                load_config(ROOT/'ros2_ws/src/hei_agent_bridge/config/skills.mock.json'),None)
+            async def partial(args,invocation):
+                raise SkillFailure('Opening confirmed; next stage incomplete',
+                    dict(side='right',position_m=.025,reached_goal=True))
+            device.skills._handlers['set_gripper_gap']=partial  # Simulated action only.
+            worker=asyncio.create_task(device.device.run(f'ws://127.0.0.1:{hub.port}'))
+            pump=asyncio.create_task(device.pump(5))
+            try:
+                await hub.wait_device('partial-test',5)
+                connector=MHSConnector(hub,'partial-test');await connector.discover()
+                result=await connector.call('set_gripper_gap',dict(side='right',gap_m=.025),call_id='partial')
+                assert result.outcome=='failure'
+                assert result.outputs==dict(side='right',position_m=.025,reached_goal=True)
+                assert 'Opening confirmed' in result.message
+            finally:
+                await device.stop();worker.cancel();pump.cancel()
+                await asyncio.gather(worker,pump,return_exceptions=True)
+    asyncio.run(run())

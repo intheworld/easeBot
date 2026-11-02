@@ -91,6 +91,8 @@ async def run(node):
 
     worker = threading.Thread(target=spin, name='agent-bridge-ros', daemon=True)
     worker.start()
+    start=getattr(observer,'start',None)
+    if start is not None:start()
     connection = asyncio.create_task(observer.device.run(url,
         hub_id=node.get_parameter('hub_id').value,
         interfaces=node.get_parameter('discovery_interface').value))

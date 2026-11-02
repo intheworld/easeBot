@@ -1,0 +1,57 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_arm_offset_plan",
+  "entry": "plan",
+  "max_steps": 32,
+  "timeout_sec": 240,
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "skill",
+      "timeout_sec": 95,
+      "inputs": {
+        "skill": "plan_arm_offset",
+        "arguments": {
+          "side": "right",
+          "frame_id": {
+            "$ref": "inputs.frame_id"
+          },
+          "dx_m": {
+            "$ref": "inputs.dx_m"
+          },
+          "dy_m": {
+            "$ref": "inputs.dy_m"
+          },
+          "dz_m": {
+            "$ref": "inputs.dz_m"
+          }
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Planning completed; no motion sent",
+        "outputs": {
+          "validated": {
+            "$ref": "nodes.plan.validated"
+          },
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          },
+          "nominal_duration_sec": {
+            "$ref": "nodes.plan.nominal_duration_sec"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "plan",
+      "target": "done"
+    }
+  ]
+}

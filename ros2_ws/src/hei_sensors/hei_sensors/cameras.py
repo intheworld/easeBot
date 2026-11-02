@@ -99,6 +99,8 @@ class Cameras(LifecycleNode):
                         code = cv2.VideoWriter_fourcc(*fourcc)
                         if not cap.set(cv2.CAP_PROP_FOURCC, code) or int(cap.get(cv2.CAP_PROP_FOURCC)) != code:
                             raise RuntimeError(f'{name}: requested camera format {fourcc} is not supported')
+                    # Best effort: some camera backends ignore buffer size.
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             for name in NAMES:
@@ -264,7 +266,10 @@ class Cameras(LifecycleNode):
                     self.frames[name] = (image, captured_stamp, rgbd)
                     self.last[name] = time.monotonic()
                     self.errors[name] = ''
-                self.stopped.wait(1 / self.fps)
+                # USB read() blocks at the camera rate. Drain continuously;
+                # ROS publishing remains limited by its independent timer.
+                if hasattr(cap, 'read_rgbd'):
+                    self.stopped.wait(1 / self.fps)
         except Exception as exc:
             if not self.stopped.is_set():
                 with self.lock:

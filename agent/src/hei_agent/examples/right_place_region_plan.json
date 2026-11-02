@@ -1,0 +1,98 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_place_region_plan",
+  "entry": "place_capture",
+  "max_steps": 8,
+  "timeout_sec": 300,
+  "nodes": [
+    {
+      "id": "place_capture",
+      "kind": "skill",
+      "timeout_sec": 10,
+      "inputs": {
+        "skill": "get_camera_observation",
+        "arguments": {
+          "camera": "front"
+        }
+      }
+    },
+    {
+      "id": "place_region",
+      "kind": "skill",
+      "timeout_sec": 95,
+      "inputs": {
+        "skill": "perceive_place_region",
+        "arguments": {
+          "observation_id": {
+            "$ref": "nodes.place_capture.observation_id"
+          },
+          "target": {
+            "$ref": "inputs.destination"
+          },
+          "relation": {
+            "$ref": "inputs.relation"
+          }
+        }
+      }
+    },
+    {
+      "id": "place_plan",
+      "kind": "skill",
+      "timeout_sec": 185,
+      "inputs": {
+        "skill": "plan_object_placement",
+        "arguments": {
+          "side": "right",
+          "region_id": {
+            "$ref": "nodes.place_region.region_id"
+          },
+          "approach_height_m": {
+            "$ref": "inputs.approach_height_m"
+          },
+          "retreat_height_m": {
+            "$ref": "inputs.retreat_height_m"
+          },
+          "release_gap_m": {
+            "$ref": "inputs.release_gap_m"
+          }
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Region and placement planning completed; no motion sent",
+        "outputs": {
+          "validated": {
+            "$ref": "nodes.place_plan.validated"
+          },
+          "plan_id": {
+            "$ref": "nodes.place_plan.plan_id"
+          },
+          "plan_ref": {
+            "$ref": "nodes.place_plan.plan_ref"
+          },
+          "region_id": {
+            "$ref": "nodes.place_region.region_id"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "place_capture",
+      "target": "place_region"
+    },
+    {
+      "source": "place_region",
+      "target": "place_plan"
+    },
+    {
+      "source": "place_plan",
+      "target": "done"
+    }
+  ]
+}

@@ -1,7 +1,8 @@
-"""Shared C2, monotone quintic trajectory for ROS playback and collision sampling.
+"""Shared jerk-bounded C2, monotone quintic trajectory for ROS playback and collision sampling.
 
-Bezier control polygons bound position, speed and acceleration without a numeric
-optimizer. Every waypoint is preserved; only phase endpoints/reversals stop.
+A global minimum-jerk phase supplies smooth intermediate derivatives. Joints
+whose spline would overshoot use monotone local derivatives. Bezier polygons
+bound position, speed, acceleration and jerk. Collision and ROS use one curve.
 """
 import math
 
@@ -18,6 +19,8 @@ class JointTrajectory:
         # Preserve the existing 60% speed allowance. Acceleration reaches that
         # speed no faster than 0.5 seconds, independently of waypoint density.
         self.speed_limit, self.acceleration_limit = speed*.6, speed*1.2
+        self.jerk_limit = speed*12.
+        candidate = self.__dict__.copy() if self._smooth_phase(q) else None
         delta = np.diff(q, axis=0)
         lengths = np.max(np.abs(delta), axis=1)
         distance = np.r_[0., np.cumsum(lengths)]
@@ -44,9 +47,11 @@ class JointTrajectory:
             controls = self._control_points(q, v, h)
             velocity = 5*np.diff(controls, axis=1)/h[:, None, None]
             acceleration = 4*np.diff(velocity, axis=1)/h[:, None, None]
-            factors = np.maximum(
+            jerk = 3*np.diff(acceleration,axis=1)/h[:,None,None]
+            factors = np.maximum.reduce((
                 self._bound(velocity)/self.speed_limit,
-                np.sqrt(self._bound(acceleration)/self.acceleration_limit))
+                np.sqrt(self._bound(acceleration)/self.acceleration_limit),
+                np.cbrt(self._bound(jerk)/self.jerk_limit)))
             updated = np.maximum(.1, h*np.power(factors, .15))
             if np.max(np.abs(updated-h)) < 1e-7:
                 break
@@ -55,6 +60,10 @@ class JointTrajectory:
         # A final uniform stretch proves the bounds even if iteration has not
         # converged. It preserves the already checked geometric curve exactly.
         scale = max(1., float(np.max(factors)))
+        jerk = 3*np.diff(acceleration,axis=1)/h[:,None,None]
+        scale = max(scale,float(np.max(self._bound(jerk)) / self.jerk_limit)**(1/3))
+        self.smoothing_method='local_monotone_quintic'
+        self.local_joints=list(range(6))
         self.positions = q
         self.accelerations = np.zeros_like(q)
         self._controls = controls
@@ -62,6 +71,57 @@ class JointTrajectory:
         self.velocities = v/scale
         self.times = np.r_[0., np.cumsum(self.intervals)]
         self.duration = float(self.times[-1])
+        if candidate is not None and candidate['duration'] <= self.duration:
+            self.__dict__.update(candidate)
+
+    def _smooth_phase(self, q):
+        """Global quintic interpolating spline, accepted only with no overshoot.
+
+        Normalize knot times using one minimum-jerk phase. A single polynomial
+        straight move is therefore independent of how densely IK sampled it.
+        Bezier derivative hulls certify limits and the same curve is used for
+        collision checking and controller reconstruction. Joints with reversals
+        or spline overshoot use local monotone derivatives on the same times.
+        """
+        from scipy.interpolate import make_interp_spline
+        delta = np.diff(q,axis=0)
+        distances = np.max(np.abs(delta),axis=1)
+        if np.any(distances <= 1e-12):
+            return False
+        fractions = np.r_[0.,np.cumsum(distances)]/sum(distances)
+        lo = np.zeros(len(q));hi = np.ones(len(q))
+        for _ in range(50):
+            u = (lo+hi)*.5
+            value = u**3*(10+u*(-15+6*u))
+            lo = np.where(value < fractions,u,lo)
+            hi = np.where(value >= fractions,u,hi)
+        u = (lo+hi)*.5;u[0]=0.;u[-1]=1.
+        spline = make_interp_spline(u,q,k=5,bc_type=([(1,np.zeros(6)),(2,np.zeros(6))],
+                                                   [(1,np.zeros(6)),(2,np.zeros(6))]))
+        v=spline(u,1);a=spline(u,2);v[[0,-1]]=0.;a[[0,-1]]=0.
+        h=np.diff(u);controls=self._control_points(q,v,h,a)
+        derivatives=np.diff(controls,axis=1)
+        local = np.any(derivatives*np.sign(delta)[:,None,:] < -1e-12,axis=(0,1))
+        local |= np.any(np.where((delta==0)[:,None,:],np.abs(derivatives),0.) > 1e-12,axis=(0,1))
+        if local.any():
+            slopes=delta/h[:,None];local_v=np.zeros_like(q)
+            same=slopes[:-1]*slopes[1:] > 0
+            local_v[1:-1]=np.where(same,np.sign(slopes[:-1])*np.minimum(abs(slopes[:-1]),abs(slopes[1:])),0.)
+            v[:,local]=local_v[:,local];a[:,local]=0.
+            controls=self._control_points(q,v,h,a)
+            derivatives=np.diff(controls,axis=1)
+        velocity=5*derivatives/h[:,None,None]
+        acceleration=4*np.diff(velocity,axis=1)/h[:,None,None]
+        jerk=3*np.diff(acceleration,axis=1)/h[:,None,None]
+        duration=max(.1,float(np.max(self._bound(velocity)))/self.speed_limit,
+                     math.sqrt(float(np.max(self._bound(acceleration)))/self.acceleration_limit),
+                     float(np.max(self._bound(jerk))/self.jerk_limit)**(1/3))
+        self.positions=q;self.velocities=v/duration;self.accelerations=a/duration**2
+        self._controls=controls;self.intervals=h*duration
+        self.times=np.r_[0.,np.cumsum(self.intervals)];self.duration=float(self.times[-1])
+        self.smoothing_method='phase_quintic'
+        self.local_joints=np.flatnonzero(local).tolist()
+        return True
 
     @staticmethod
     def _bound(points):
@@ -79,10 +139,11 @@ class JointTrajectory:
         return np.max(np.abs(pieces),axis=(1,2,3))
 
     @staticmethod
-    def _control_points(q, v, h):
+    def _control_points(q, v, h, a=None):
         hv = h[:, None]/5
-        return np.stack((q[:-1], q[:-1]+hv*v[:-1], q[:-1]+2*hv*v[:-1],
-                         q[1:]-2*hv*v[1:], q[1:]-hv*v[1:], q[1:]), axis=1)
+        ha = h[:,None]**2/20
+        return np.stack((q[:-1], q[:-1]+hv*v[:-1], q[:-1]+2*hv*v[:-1]+(0 if a is None else ha*a[:-1]),
+                         q[1:]-2*hv*v[1:]+(0 if a is None else ha*a[1:]), q[1:]-hv*v[1:], q[1:]), axis=1)
 
     def evaluate(self, segment, fraction):
         """Position/velocity/acceleration at a segment fraction in [0, 1]."""

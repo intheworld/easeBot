@@ -1,0 +1,475 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_stack_blocks",
+  "entry": "observe",
+  "max_steps": 24,
+  "timeout_sec": 1200,
+  "nodes": [
+    {
+      "id": "observe",
+      "kind": "skill",
+      "inputs": {
+        "skill": "get_robot_state",
+        "arguments": {}
+      },
+      "timeout_sec": 2
+    },
+    {
+      "id": "ready",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.observe.ready"
+        }
+      },
+      "timeout_sec": 30.0
+    },
+    {
+      "id": "capture_target",
+      "kind": "skill",
+      "inputs": {
+        "skill": "get_camera_observation",
+        "arguments": {
+          "camera": "front"
+        }
+      },
+      "timeout_sec": 2
+    },
+    {
+      "id": "perceive_blue",
+      "kind": "skill",
+      "inputs": {
+        "skill": "perceive_grasp_target",
+        "arguments": {
+          "observation_id": {
+            "$ref": "nodes.capture_target.observation_id"
+          },
+          "target": "blue block"
+        }
+      },
+      "timeout_sec": 90
+    },
+    {
+      "id": "plan_grasp",
+      "kind": "skill",
+      "inputs": {
+        "skill": "plan_right_grasp_from_object",
+        "arguments": {
+          "object_id": {
+            "$ref": "nodes.perceive_blue.object_id"
+          }
+        }
+      },
+      "timeout_sec": 180
+    },
+    {
+      "id": "grasp_validated",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.plan_grasp.validated"
+        }
+      },
+      "timeout_sec": 30.0
+    },
+    {
+      "id": "execute_grasp",
+      "kind": "skill",
+      "inputs": {
+        "skill": "execute_right_grasp",
+        "arguments": {
+          "plan_id": {
+            "$ref": "nodes.plan_grasp.plan_id"
+          }
+        }
+      },
+      "timeout_sec": 300
+    },
+    {
+      "id": "check_contact",
+      "kind": "skill",
+      "inputs": {
+        "skill": "observe_gripper",
+        "arguments": {
+          "side": {
+            "$ref": "inputs.side"
+          }
+        }
+      },
+      "timeout_sec": 60
+    },
+    {
+      "id": "capture_confirmed",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.check_contact.physical_capture_verified"
+        }
+      },
+      "timeout_sec": 30.0
+    },
+    {
+      "id": "capture_support",
+      "kind": "skill",
+      "inputs": {
+        "skill": "get_camera_observation",
+        "arguments": {
+          "camera": "front"
+        }
+      },
+      "timeout_sec": 2
+    },
+    {
+      "id": "perceive_red_support",
+      "kind": "skill",
+      "inputs": {
+        "skill": "perceive_place_region",
+        "arguments": {
+          "observation_id": {
+            "$ref": "nodes.capture_support.observation_id"
+          },
+          "target": "top of the red block",
+          "relation": "on"
+        }
+      },
+      "timeout_sec": 90
+    },
+    {
+      "id": "plan_placement",
+      "kind": "skill",
+      "inputs": {
+        "skill": "plan_object_placement",
+        "arguments": {
+          "side": {
+            "$ref": "inputs.side"
+          },
+          "region_id": {
+            "$ref": "nodes.perceive_red_support.region_id"
+          },
+          "approach_height_m": 0.05,
+          "retreat_height_m": 0.05,
+          "release_gap_m": 0.05
+        }
+      },
+      "timeout_sec": 180
+    },
+    {
+      "id": "placement_validated",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.plan_placement.validated"
+        }
+      },
+      "timeout_sec": 30.0
+    },
+    {
+      "id": "execute_placement",
+      "kind": "skill",
+      "inputs": {
+        "skill": "execute_place_plan",
+        "arguments": {
+          "plan_id": {
+            "$ref": "nodes.plan_placement.plan_id"
+          }
+        }
+      },
+      "timeout_sec": 600
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "The right-arm grasp and placement sequence completed. Sustained jaw/load contact was confirmed before transfer; execution completion alone does not prove physical placement.",
+        "outputs": {
+          "physical_capture_verified_before_transfer": {
+            "$ref": "nodes.check_contact.physical_capture_verified"
+          },
+          "placed": {
+            "$ref": "nodes.execute_placement.placed"
+          },
+          "retracted": {
+            "$ref": "nodes.execute_placement.retracted"
+          },
+          "release_confirmed": {
+            "$ref": "nodes.execute_placement.release_confirmed"
+          },
+          "placement_verified": {
+            "$ref": "nodes.execute_placement.placement_verified"
+          },
+          "detail_ref": {
+            "$ref": "nodes.execute_placement.detail_ref"
+          }
+        }
+      },
+      "timeout_sec": 30.0
+    },
+    {
+      "id": "contact_failed",
+      "kind": "end",
+      "inputs": {
+        "status": "failed",
+        "message": "Sustained jaw/load contact was not verified after closure. No lift or placement was attempted, and no automatic retry or release was commanded.",
+        "outputs": {
+          "physical_capture_verified": {
+            "$ref": "nodes.check_contact.physical_capture_verified"
+          }
+        }
+      },
+      "timeout_sec": 30.0
+    },
+    {
+      "id": "failed",
+      "kind": "end",
+      "inputs": {
+        "status": "failed",
+        "message": "Robot readiness, perception, plan validation, or execution failed or timed out. Task completion is not confirmed. No automatic motion retry, recovery release, or return is requested.",
+        "outputs": {}
+      },
+      "timeout_sec": 30.0
+    }
+  ],
+  "edges": [
+    {
+      "source": "observe",
+      "target": "ready",
+      "on": "success"
+    },
+    {
+      "source": "observe",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "observe",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "observe",
+      "target": "failed",
+      "on": "timeout"
+    },
+    {
+      "source": "ready",
+      "target": "capture_target",
+      "on": "true"
+    },
+    {
+      "source": "ready",
+      "target": "failed",
+      "on": "false"
+    },
+    {
+      "source": "capture_target",
+      "target": "perceive_blue",
+      "on": "success"
+    },
+    {
+      "source": "capture_target",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "capture_target",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "capture_target",
+      "target": "failed",
+      "on": "timeout"
+    },
+    {
+      "source": "perceive_blue",
+      "target": "plan_grasp",
+      "on": "success"
+    },
+    {
+      "source": "perceive_blue",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "perceive_blue",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "perceive_blue",
+      "target": "failed",
+      "on": "timeout"
+    },
+    {
+      "source": "plan_grasp",
+      "target": "grasp_validated",
+      "on": "success"
+    },
+    {
+      "source": "plan_grasp",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "plan_grasp",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "plan_grasp",
+      "target": "failed",
+      "on": "timeout"
+    },
+    {
+      "source": "grasp_validated",
+      "target": "execute_grasp",
+      "on": "true"
+    },
+    {
+      "source": "grasp_validated",
+      "target": "failed",
+      "on": "false"
+    },
+    {
+      "source": "execute_grasp",
+      "target": "check_contact",
+      "on": "success"
+    },
+    {
+      "source": "execute_grasp",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "execute_grasp",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "execute_grasp",
+      "target": "failed",
+      "on": "timeout"
+    },
+    {
+      "source": "check_contact",
+      "target": "capture_confirmed",
+      "on": "success"
+    },
+    {
+      "source": "check_contact",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "check_contact",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "check_contact",
+      "target": "failed",
+      "on": "timeout"
+    },
+    {
+      "source": "capture_confirmed",
+      "target": "capture_support",
+      "on": "true"
+    },
+    {
+      "source": "capture_confirmed",
+      "target": "contact_failed",
+      "on": "false"
+    },
+    {
+      "source": "capture_support",
+      "target": "perceive_red_support",
+      "on": "success"
+    },
+    {
+      "source": "capture_support",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "capture_support",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "capture_support",
+      "target": "failed",
+      "on": "timeout"
+    },
+    {
+      "source": "perceive_red_support",
+      "target": "plan_placement",
+      "on": "success"
+    },
+    {
+      "source": "perceive_red_support",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "perceive_red_support",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "perceive_red_support",
+      "target": "failed",
+      "on": "timeout"
+    },
+    {
+      "source": "plan_placement",
+      "target": "placement_validated",
+      "on": "success"
+    },
+    {
+      "source": "plan_placement",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "plan_placement",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "plan_placement",
+      "target": "failed",
+      "on": "timeout"
+    },
+    {
+      "source": "placement_validated",
+      "target": "execute_placement",
+      "on": "true"
+    },
+    {
+      "source": "placement_validated",
+      "target": "failed",
+      "on": "false"
+    },
+    {
+      "source": "execute_placement",
+      "target": "done",
+      "on": "success"
+    },
+    {
+      "source": "execute_placement",
+      "target": "failed",
+      "on": "failure"
+    },
+    {
+      "source": "execute_placement",
+      "target": "failed",
+      "on": "error"
+    },
+    {
+      "source": "execute_placement",
+      "target": "failed",
+      "on": "timeout"
+    }
+  ]
+}

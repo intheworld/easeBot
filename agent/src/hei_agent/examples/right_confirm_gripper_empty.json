@@ -1,0 +1,47 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_confirm_gripper_empty",
+  "entry": "confirm",
+  "max_steps": 2,
+  "timeout_sec": 15,
+  "nodes": [
+    {
+      "id": "confirm",
+      "kind": "skill",
+      "inputs": {
+        "skill": "confirm_gripper_empty",
+        "arguments": {
+          "side": "right",
+          "observed_empty": {
+            "$ref": "inputs.observed_empty"
+          }
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Operator-confirmed empty gripper; carry record cleared, no motion sent",
+        "outputs": {
+          "status": {
+            "$ref": "nodes.confirm.status"
+          },
+          "payload_id": {
+            "$ref": "nodes.confirm.payload_id"
+          },
+          "placed_count": {
+            "$ref": "nodes.confirm.placed_count"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "confirm",
+      "target": "done"
+    }
+  ]
+}

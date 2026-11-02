@@ -1,11 +1,9 @@
-"""Offline, kinematic MuJoCo validation. Never imports a hardware controller."""
+"""Trajectory sampling and collision policy, independent of offline scene building."""
 from __future__ import annotations
 
 import hashlib
 import json
 import math
-import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -57,10 +55,13 @@ def trajectory_samples(plan, max_step=.005):
     if not np.isfinite([opened, closed]).all() or not -4.5 <= opened < closed <= 0:
         raise ValueError(f'Invalid gripper targets: open={opened}, closed={closed}; expected -4.5 <= open < closed <= 0')
     approach = [_vector(x, 6, 'approach') for x in plan['approach_joint_rad']]
+    pregrasp = [_vector(x, 6, 'pregrasp') for x in plan.get('pregrasp_joint_path',[plan['pregrasp_joint_rad']])]
+    if not pregrasp or not np.allclose(pregrasp[-1],plan['pregrasp_joint_rad'],atol=1e-8):
+        raise ValueError('Pregrasp path endpoint differs from pregrasp joints')
     if not approach:
         raise ValueError('Approach must be nonempty')
     phases = [('open', [q.copy()], opened),
-              ('pregrasp', [_vector(plan['pregrasp_joint_rad'], 6, 'pregrasp')], opened),
+              ('pregrasp', pregrasp, opened),
               ('approach', approach, opened), ('close', [approach[-1]], closed)]
     elapsed = 0.
     yield elapsed, 'start', q.copy(), grip
@@ -78,152 +79,28 @@ def trajectory_samples(plan, max_step=.005):
         q, grip = path[-1].copy(), next_grip
 
 
-def stl_components(path):
-    """Partition disconnected binary STL solids without excluding any geometry."""
-    from scipy.sparse import coo_matrix
-    from scipy.sparse.csgraph import connected_components
-    raw = Path(path).read_bytes()
-    if len(raw) < 84:
-        raise ValueError('Unsupported STL')
-    count = int.from_bytes(raw[80:84], 'little')
-    if len(raw) != 84+50*count:
-        raise ValueError('Expected binary STL')
-    dtype = np.dtype([('normal', '<f4', (3,)), ('vertices', '<f4', (3, 3)), ('attribute', '<u2')])
-    points = np.frombuffer(raw, dtype=dtype, count=count, offset=84)['vertices'].reshape(-1, 3)
-    vertices, inverse = np.unique(points, axis=0, return_inverse=True)
-    faces = inverse.reshape(-1, 3)
-    a, b = faces.ravel(), faces[:, [1, 2, 0]].ravel()
-    graph = coo_matrix((np.ones(len(a)), (a, b)), shape=(len(vertices), len(vertices)))
-    number, labels = connected_components(graph, directed=False)
-    pieces = [vertices[labels == i].astype(float) for i in range(number)]
-    if any(len(v) < 4 or np.linalg.matrix_rank(v-v.mean(0)) < 3 for v in pieces):
-        # Never discard degenerate fragments; keep the original collider instead.
-        return [vertices.astype(float)]
-    return pieces
-
-
-def split_collision_meshes(spec, urdf):
-    """Use one conservative convex hull per disconnected CAD solid, not per assembly."""
-    import mujoco
-    urdf = Path(urdf).resolve()
-    compiler = ET.parse(urdf).getroot().find('mujoco/compiler')
-    meshdir = compiler.get('meshdir', '') if compiler is not None else ''
-    for geom in list(spec.geoms):
-        if geom.group != 0 or not geom.meshname:
-            continue
-        asset = spec.mesh(geom.meshname)
-        source = urdf.parent / meshdir / Path(asset.file).name
-        if not source.is_file() or source.suffix.lower() != '.stl':
-            continue
-        try:
-            pieces = stl_components(source)
-        except ValueError:
-            continue
-        if len(pieces) == 1:
-            continue
-        body = geom.parent
-        for index, vertices in enumerate(pieces):
-            name = f'collision_{body.name}_part{index}'
-            spec.add_mesh(name=name, uservert=vertices.ravel().tolist(), scale=asset.scale,
-                          refpos=asset.refpos, refquat=asset.refquat)
-            body.add_geom(name=name, type=mujoco.mjtGeom.mjGEOM_MESH, meshname=name,
-                          pos=geom.pos, quat=geom.quat, group=0, contype=1, conaffinity=1,
-                          rgba=[.5, .5, .5, .3])
-        spec.delete(geom)
+# Compatibility entry points for saved offline replay scripts. Online callers
+# use collision.build_scene; MuJoCo is only reached through explicit fallback.
+from ..collision.meshes import stl_components
 
 
 def build_scene(urdf, plan, scene, *, targets=None):
-    import mujoco
-    spec = mujoco.MjSpec.from_file(str(Path(urdf).resolve()))
-    spec.worldbody.add_light(name='validation_light', pos=[2., -2., 3.],
-                             dir=[-1., 1., -1.],
-                             diffuse=[.8, .8, .8], ambient=[.3, .3, .3])
-    spec.worldbody.add_geom(name='validation_ground', type=mujoco.mjtGeom.mjGEOM_PLANE,
-                            size=[3., 3., .1], rgba=[.18, .2, .23, 1.],
-                            contype=1, conaffinity=1)
-    split_collision_meshes(spec, urdf)
-    # Anchor the measured table and targets to the calibrated right-arm base.
-    base = spec.body('a_right_base_link')
-    if base is None:
-        raise ValueError('MuJoCo model missing a_right_base_link')
-    if scene.get('table_top_z_m') is not None:
-        z = float(scene['table_top_z_m'])
-        xy = _vector(scene.get('table_center_xy_m', [.92, 0]), 2, 'table center')
-        size = _vector(scene.get('table_size_xy_m', [.96, 1.24]), 2, 'table size')
-        thickness = float(scene.get('table_thickness_m', .04))
-        if not np.isfinite([z, thickness]).all() or thickness <= 0 or np.any(size <= 0):
-            raise ValueError('Invalid table dimensions')
-        table_frame = scene.get('table_frame', 'a_right_base_link')
-        if table_frame not in ('a_right_base_link', 'base_footprint'):
-            raise ValueError('table_frame must be a_right_base_link or base_footprint')
-        table_parent = spec.body(table_frame)
-        if table_parent is None:
-            raise ValueError(f'Missing table coordinate frame: {table_frame}')
-        table_parent.add_geom(name='validation_table', type=mujoco.mjtGeom.mjGEOM_BOX,
-                      pos=[*xy, z-thickness/2], size=[* (size/2), thickness/2],
-                      rgba=[.45, .32, .18, .5], contype=1, conaffinity=1)
-    # Mark the planned grasp/approach, not an invented knife collision mesh.
-    if targets is None:
-        targets = [('grasp', plan['T_grasp'], [1., .8, 0., 1.]),
-                   ('pregrasp', plan['T_pregrasp'], [0., 1., 0., 1.])]
-    for name, value, color in targets:
-        target = validate_transforms(np.asarray(value, dtype=float)[None], name)[0]
-        base.add_site(name=f'validation_{name}', pos=target[:3, 3], size=[.008], rgba=color)
-        for axis in range(3):
-            endpoint = target[:3, 3]+target[:3, axis]*.06
-            rgba = [0., 0., 0., 1.]; rgba[axis] = 1.
-            base.add_site(name=f'validation_{name}_axis{axis}', type=mujoco.mjtGeom.mjGEOM_CAPSULE,
-                          fromto=np.r_[target[:3, 3], endpoint], size=[.002], rgba=rgba)
-    model = spec.compile()
-    # Remove the same upper-bound restriction from the kinematic preview.
-    # Lower bounds remain checked explicitly by validate_plan.
-    for name in ('a_right_joint2', 'a_right_joint3'):
-        model.jnt_limited[model.joint(name).id] = 0
-    data = mujoco.MjData(model)
-    for i, val in enumerate(scene.get('left_joint_rad') or [0., -.5, -.5, 0., 0., 0.]):
-        data.qpos[model.joint(f'b_left_joint{i+1}').qposadr] = val
-    data.qpos[model.joint('lift_joint').qposadr] = float(scene.get('lift_joint_m') or 0.)
-    left_open = float(scene.get('left_finger_opening_m') or 0.)
-    for side, sign in [('L', 1), ('R', -1)]:
-        data.qpos[model.joint(f'b_left_end_joint_{side}_finger').qposadr] = sign*left_open
-    clearance = float(scene.get('clearance_m', .003))
-    if not np.isfinite(clearance) or not 0 <= clearance <= .03:
-        raise ValueError('Invalid collision clearance')
-    # URDF group 0 is collision geometry, group 1 is visual geometry.
-    for i in range(model.ngeom):
-        if model.geom_group[i] == 0:
-            model.geom_contype[i] = 1
-            model.geom_conaffinity[i] = 1
-            model.geom_margin[i] = clearance
-    model.opt.gravity[:] = 0
-    mujoco.mj_forward(model, data)
-    for i in range(model.njnt):
-        if model.jnt_limited[i]:
-            value = data.qpos[model.jnt_qposadr[i]]
-            low, high = model.jnt_range[i]
-            if not low-1e-6 <= value <= high+1e-6:
-                raise ValueError(f'Scene joint outside limits: {model.joint(i).name}')
-    return model, data
+    from ..collision.mujoco_scene import build_scene as build_offline_scene
+    return build_offline_scene(urdf,plan,scene,targets=targets)
 
 
 def set_pose(model, data, q, grip):
-    import mujoco
-    for i, value in enumerate(q):
-        data.qpos[model.joint(f'a_right_joint{i+1}').qposadr] = value
-    # HEI follower convention: -4.5 rad open, 0 rad closed; URDF slide is 0..0.05 m.
-    opening = float(np.clip(-grip/4.5, 0., 1.))*.05
-    for side, sign in [('L', 1), ('R', -1)]:
-        data.qpos[model.joint(f'a_right_end_joint_{side}_finger').qposadr] = sign*opening
-    mujoco.mj_forward(model, data)
+    if getattr(model,'backend',None)=='fcl':
+        model.set_pose(q,grip)
+    else:
+        from ..collision.mujoco_scene import set_pose as set_offline_pose
+        set_offline_pose(model,data,q,grip)
 
 
-def relative_tcp(model, data):
-    base, tcp = model.body('a_right_base_link').id, model.body('a_right_tcp').id
-    rotation = data.xmat[base].reshape(3, 3)
-    target = np.eye(4)
-    target[:3, :3] = rotation.T @ data.xmat[tcp].reshape(3, 3)
-    target[:3, 3] = rotation.T @ (data.xpos[tcp]-data.xpos[base])
-    return target
+def relative_tcp(model,data):
+    if getattr(model,'backend',None)=='fcl':return model.tcp()
+    from ..collision.mujoco_scene import relative_tcp as offline_tcp
+    return offline_tcp(model,data)
 
 
 class CollisionScreen:
@@ -249,22 +126,45 @@ class CollisionScreen:
         self.table_gripper_clearance = float(scene.get('table_gripper_clearance_m', 0.))
         if not np.isfinite(self.table_gripper_clearance) or not -.003 <= self.table_gripper_clearance <= 0:
             raise ValueError('Table/gripper clearance must be between -0.003 and 0 m')
+        self.support_contact=None;self.support_separated=False
+        self.payload_padding=float(scene.get('payload_padding_m',.003))
+        self.release_body = scene.get('release_object_body','')
         self.right_fingers = {'a_right_end_link_L_finger', 'a_right_end_link_R_finger'}
 
     def check(self, phase, elapsed):
+        support_seen=False
         for contact in self.data.contact[:self.data.ncon]:
             g1, g2 = int(contact.geom1), int(contact.geom2)
             b1, b2 = self.model.body(self.model.geom_bodyid[g1]).name, self.model.body(self.model.geom_bodyid[g2]).name
-            if not (b1.startswith('a_right') or b2.startswith('a_right')):
+            if not (b1.startswith('a_right') or b2.startswith('a_right') or
+                    {b1, b2} & getattr(self.model, 'moving', set())):
+                continue
+            # Only the gripping fingers may contact the carried object. The
+            # payload still collides with the arm, table, base and placed objects.
+            if ({b1,b2} & self.right_fingers and
+                    ('a_right_payload' in (b1,b2) or self.release_body in (b1,b2) and self.release_body)):
                 continue
             # Expected finger-tip contact at fully closed jaws (CAD tolerance).
             if {b1, b2} == {'a_right_end_link_L_finger', 'a_right_end_link_R_finger'} and contact.dist >= -.001:
                 continue
+            region_floor=any(name.startswith('placed_') and name.endswith('_floor') for name in (b1,b2))
+            if 'a_right_payload' in (b1,b2) and (region_floor or 'validation_table' in (self.model.geom(g1).name,self.model.geom(g2).name)):
+                center=self.data.xpos[self.model.body('a_right_payload').id].copy()
+                if self.support_contact is None and elapsed==0 and contact.dist>=-(2 if region_floor else 1)*self.payload_padding-1e-6:
+                    self.support_contact=(center,float(contact.dist))
+                if self.support_contact is not None and not self.support_separated:
+                    origin,depth=self.support_contact
+                    separating=(elapsed==0 or center[2]>origin[2]+1e-8 or np.linalg.norm(center-origin)<1e-8)
+                    if separating and np.linalg.norm(center[:2]-origin[:2])<=.001 and center[2]>=origin[2]-1e-5 and contact.dist>=depth-1e-5:
+                        support_seen=True
+                        continue
             if contact.dist < self.clearance:
                 key = tuple(sorted((g1, g2)))
                 item = dict(phase=phase, time_s=float(elapsed), distance_m=float(contact.dist),
                             bodies=[b1, b2], geom_ids=[g1, g2], geoms=[self.model.geom(g1).name or f'geom_{g1}',
                                                   self.model.geom(g2).name or f'geom_{g2}'])
+                item['constraint_kind'] = ('unobserved_space' if any('_coverage_unknown_' in b for b in (b1,b2))
+                                           else 'observed_geometry')
                 exclusion = self.exclusions.get(tuple(sorted((b1, b2))))
                 destination = self.collisions
                 if exclusion and contact.dist >= -exclusion['max_penetration_m']:
@@ -277,11 +177,15 @@ class CollisionScreen:
                 if key not in destination or item['distance_m'] < destination[key]['distance_m']:
                     destination[key] = item
 
+        if self.support_contact is not None and not support_seen:self.support_separated=True
 
-def validate_plan(plan, urdf, scene):
+
+def validate_plan(plan, urdf, scene, *, backend="fcl"):
+    from ..collision import build_scene as build_online_scene
+    if backend not in ("fcl", "mujoco"):
+        raise ValueError("Unknown collision backend")
     if plan.get('schema_version') != 3 or plan.get('strategy') != 'top_down_direct_ik':
         raise ValueError('Unsupported grasp plan; regenerate an OBB plan')
-    import mujoco
     required = ('motion_config', 'start_gripper_rad', 'start_joint_rad', 'pregrasp_joint_rad',
                 'approach_joint_rad', 'T_grasp', 'T_pregrasp')
     missing_plan = [key for key in required if key not in plan]
@@ -294,12 +198,15 @@ def validate_plan(plan, urdf, scene):
     if plan.get('base_frame') != fk.base_frame or plan.get('tool_frame') != fk.tool_frame:
         raise ValueError('Plan coordinate frames do not match the robot')
     scene = dict(scene)
+    known=plan.get('target_obb',{}).get('known_obstacle_id')
+    if known:scene['release_object_body']='placed_'+known
     if scene.get('left_joint_rad') is not None:
         scene['left_joint_rad'] = _vector(scene['left_joint_rad'], 6, 'left joints').tolist()
     for key in ('lift_joint_m', 'left_finger_opening_m'):
         if scene.get(key) is not None and not np.isfinite(float(scene[key])):
             raise ValueError(f'Invalid {key}')
-    model, data = build_scene(urdf, plan, scene)
+    builder = build_online_scene if backend == "fcl" else build_scene
+    model, data = builder(urdf, plan, scene)
     screen = CollisionScreen(model, data, scene)
     problems = []
     missing = [key for key in ('table_top_z_m', 'left_joint_rad', 'lift_joint_m', 'left_finger_opening_m')
@@ -308,16 +215,18 @@ def validate_plan(plan, urdf, scene):
         missing.append('scene_confirmed')
     samples = 0
     max_fk_error = 0.
-    for elapsed, phase, q, grip in trajectory_samples(plan):
+    from ..collision.cuda_batch import posed_samples
+    for elapsed, phase, q, grip in posed_samples(model,data,trajectory_samples(plan)):
         samples += 1
         for i, value in enumerate(q):
             if not joint_lower[i]-1e-6 <= value <= joint_upper[i]+1e-6:
                 problems.append(f'{phase}: right joint {i+1} violates hardware limits')
-        set_pose(model, data, q, grip)
         error = float(np.max(np.abs(relative_tcp(model, data)-fk(q))))
         max_fk_error = max(max_fk_error, error)
         screen.check(phase, elapsed)
-    paths = [('pregrasp',[plan['pregrasp_joint_rad']]),('approach',plan['approach_joint_rad'])]
+        if backend == 'fcl' and screen.collisions:
+            break
+    paths = [('pregrasp',plan.get('pregrasp_joint_path',[plan['pregrasp_joint_rad']])),('approach',plan['approach_joint_rad'])]
     for phase, waypoints in paths:
         for q in waypoints:
             for i, value in enumerate(q):
@@ -325,7 +234,7 @@ def validate_plan(plan, urdf, scene):
                 if not low+.05-1e-6 <= value <= high-.05+1e-6:
                     problems.append(f'{phase}: planned joint {i+1} violates IK margin')
     if max_fk_error > 1e-5:
-        problems.append('MuJoCo TCP differs from calibrated URDF FK')
+        problems.append('Collision backend TCP differs from calibrated URDF FK')
     endpoint_errors = {}
     endpoints = [('pregrasp',plan['pregrasp_joint_rad'],'T_pregrasp'),
                  ('grasp',plan['approach_joint_rad'][-1],'T_grasp')]
@@ -339,7 +248,7 @@ def validate_plan(plan, urdf, scene):
         if pos > .005 or angle > np.deg2rad(3):
             problems.append(f'{name}: TCP target error exceeds 5 mm / 3 degrees')
     status = 'failed' if screen.collisions or problems else ('incomplete' if missing else 'passed')
-    result = dict(status=status, samples=samples,
+    result = dict(status=status, samples=samples, collision_backend=backend, collision_accelerator=getattr(model,"collision_accelerator","cpu"),
                   start_gripper_feedback_rad=float(plan['start_gripper_rad']),
                   start_gripper_model_rad=normalize_gripper_feedback(plan['start_gripper_rad']), collision_pairs=list(screen.collisions.values()),
                   ignored_collision_pairs=list(screen.ignored.values()),
@@ -352,7 +261,6 @@ def validate_plan(plan, urdf, scene):
                   plan_sha256=hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest(),
                   limitations=['Kinematic sampled screening; not continuous collision or dynamics validation.',
                                'Each disconnected CAD solid uses a convex hull; concavity inside a solid is still approximated.',
-                               'Carried object, unmodeled obstacles and real tracking/calibration errors are not checked.',
+                               'Known carried/placed boxes are checked; unmodeled obstacles, hidden surfaces and real tracking/calibration errors remain unknown.',
                                'Finger opening uses a linear motor-to-URDF approximation.'])
     return result, model, data
-

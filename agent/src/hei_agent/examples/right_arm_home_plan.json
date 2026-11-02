@@ -1,0 +1,48 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_arm_home_plan",
+  "entry": "plan",
+  "max_steps": 2,
+  "timeout_sec": 100,
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "skill",
+      "timeout_sec": 95,
+      "inputs": {
+        "skill": "plan_arm_home",
+        "arguments": {
+          "side": "right"
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Home planning completed; no motion sent",
+        "outputs": {
+          "validated": {
+            "$ref": "nodes.plan.validated"
+          },
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          },
+          "plan_id": {
+            "$ref": "nodes.plan.plan_id"
+          },
+          "nominal_duration_sec": {
+            "$ref": "nodes.plan.nominal_duration_sec"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "plan",
+      "target": "done"
+    }
+  ]
+}

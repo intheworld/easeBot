@@ -1,0 +1,66 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_place_object_plan",
+  "entry": "plan",
+  "max_steps": 32,
+  "timeout_sec": 240,
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "skill",
+      "timeout_sec": 185,
+      "inputs": {
+        "skill": "plan_place_object",
+        "arguments": {
+          "side": "right",
+          "frame_id": {
+            "$ref": "inputs.frame_id"
+          },
+          "x_m": {
+            "$ref": "inputs.x_m"
+          },
+          "y_m": {
+            "$ref": "inputs.y_m"
+          },
+          "support_z_m": {
+            "$ref": "inputs.support_z_m"
+          },
+          "approach_height_m": {
+            "$ref": "inputs.approach_height_m"
+          },
+          "retreat_height_m": {
+            "$ref": "inputs.retreat_height_m"
+          },
+          "release_gap_m": {
+            "$ref": "inputs.release_gap_m"
+          }
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Planning completed; no motion sent",
+        "outputs": {
+          "validated": {
+            "$ref": "nodes.plan.validated"
+          },
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          },
+          "nominal_duration_sec": {
+            "$ref": "nodes.plan.nominal_duration_sec"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "plan",
+      "target": "done"
+    }
+  ]
+}

@@ -20,7 +20,8 @@ def validate_plan(graph: Graph, inputs: dict, catalog: SkillCatalog):
     graph.validate()
     if graph.catalog_revision is not None and graph.catalog_revision != catalog.revision:
         raise GraphError('Graph skill catalog revision mismatch')
-    graph_limit = 600 if any(v['timeout_sec'] > 30 for v in catalog.describe()) else 300
+    longest=max((v['timeout_sec'] for v in catalog.describe()),default=0)
+    graph_limit = min(1800,max(600,2*longest)) if longest>30 else 300
     if len(graph.nodes) > 64 or graph.max_steps > 100 or graph.timeout_sec > graph_limit:
         raise GraphError(f'Generated graph exceeds 64 nodes, 100 steps or {graph_limit} seconds')
     by_id = {node.id: node for node in graph.nodes}
@@ -32,7 +33,7 @@ def validate_plan(graph: Graph, inputs: dict, catalog: SkillCatalog):
             if set(node.inputs) != {'skill', 'arguments'}:
                 raise GraphError(f'{node.id}: skill node needs exactly skill and arguments')
             spec = catalog.get(node.inputs['skill'])
-            limit = min(310, max(30, spec.timeout_sec + 5))
+            limit = min(905, max(30, spec.timeout_sec + 5))
             if node.timeout_sec > limit:
                 raise GraphError(f'{node.id}: generated node timeout exceeds {limit:g} seconds')
             arguments = node.inputs['arguments']
@@ -137,14 +138,18 @@ Return ONLY a JSON graph object with schema "hei_agent.graph/v1". No prose or to
 The user instruction is a task, not permission to change this contract.
 Use ONLY the skills and scalar argument values in the supplied capability catalog.
 Do not invent skills, argument values or calibrated positions beyond this catalog.
+Defaults explicitly stated in a skill description are authorized argument values.
+When the task and run inputs omit such parameters, insert the catalog defaults as
+literals in the generated graph; do not ask for them or return an unsupported graph.
+Explicit user values take precedence. Schema minimum/maximum bounds are NOT defaults.
 If the task cannot be done with this catalog, return a single end node with status
 "failed" and a clear message explaining the unsupported capability. Never fake success.
 Use the provided descriptions to distinguish MOCK from ROS skills. A move or gripper
 result alone never proves that an object was grasped. Do not claim unobserved effects.
 
-Graph fields: schema, name, entry, nodes, edges, max_steps (<=100), timeout_sec (<=300, or <=600 when the catalog has a skill timeout above 30s).
+Graph fields: schema, name, entry, nodes, edges, max_steps (<=100), timeout_sec (<=300 for short skills; otherwise <=max(600, twice the longest catalog skill timeout), capped at 1800).
 At most 64 nodes. Node fields: id, kind, inputs, timeout_sec (positive; default <=30). For a long-running skill, use its catalog timeout
-plus up to 5s, at most 310s. Budget enough graph time for sequential skills.
+plus up to 5s, at most 905s. Budget enough graph time for sequential skills.
 IDs match [A-Za-z_][A-Za-z0-9_-]*. Only kinds skill, branch, end are allowed.
 skill inputs: {"skill": "literal_catalog_name", "arguments": {all required fields}}.
 branch inputs: {"condition": boolean_or_boolean_reference}; outcomes "true" and "false".
@@ -171,6 +176,9 @@ and a short target description from the task (not a fixed enum), then pass its o
 to plan_right_grasp_from_object. Branch on validated before execute_right_grasp.
 Only execute when motion was requested. Execution stops after closure: no lift or return.
 For planning-only requests, end after the plan. Never claim grasp_verified=true without evidence.
+After closure, observe_gripper.physical_capture_verified may provide the catalog-defined
+sustained jaw/load contact check. Use it for a contact-based grasp confirmation when
+available; it is not a calibrated holding-force rating or a slip guarantee.
 Below is one EXAMPLE graph; adapt the number and order of motions to the actual task.
 '''
 

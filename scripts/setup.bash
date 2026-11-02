@@ -6,6 +6,7 @@ agent_server=false
 camera_sdk=false
 grasp=false
 arm_motion=false
+gpu_planner=false
 for arg in "$@"; do
   case "$arg" in
     --without-agent-bridge) without_agent=true ;;
@@ -13,14 +14,16 @@ for arg in "$@"; do
     --camera-sdk) camera_sdk=true ;;
     --grasp) grasp=true ;;
     --arm-motion) arm_motion=true ;;
+    --gpu-planner) gpu_planner=true ;;
     -h|--help)
       cat <<'HELP'
-Usage: bash scripts/setup.bash [--without-agent-bridge | --agent-server | --camera-sdk | --grasp | --arm-motion]
+Usage: bash scripts/setup.bash [--without-agent-bridge | --agent-server | --camera-sdk | --grasp | --arm-motion | --gpu-planner]
 
 --agent-server prepares agent/.venv with the local discovery package and Agent
 LLM/MHS dependencies only; no ROS environment is required.
 --camera-sdk prepares only the pinned RealSense Python SDK in .deps/.
 --grasp checks the existing rebot_grasp compute environment and weights only.
+--gpu-planner builds pinned cuRobo in an isolated CUDA worker environment.
 --arm-motion checks only the IK/collision compute dependencies; no detector/weights required.
 
 Source the ROS 2 Jazzy underlay first. Prepare build plugins, ROS Rust discovery,
@@ -34,12 +37,17 @@ HELP
   esac
 done
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "$gpu_planner" == true ]]; then
+  if [[ "$#" != 1 ]]; then echo '--gpu-planner must be used alone' >&2; exit 2; fi
+  bash "$repo_root/scripts/setup/prepare-gpu-planner.bash"
+  exit 0
+fi
 if [[ "$arm_motion" == true ]]; then
   if [[ "$agent_server" == true || "$without_agent" == true || "$camera_sdk" == true || "$grasp" == true ]]; then
     echo '--arm-motion must be used alone' >&2
     exit 2
   fi
-  python3 "$repo_root/scripts/setup/prepare-grasp.py" --arm-only
+  python3 "$repo_root/scripts/setup/prepare-grasp.py" --install-collision --arm-only
   exit 0
 fi
 if [[ "$grasp" == true ]]; then
@@ -47,7 +55,7 @@ if [[ "$grasp" == true ]]; then
     echo '--grasp must be used alone' >&2
     exit 2
   fi
-  python3 "$repo_root/scripts/setup/prepare-grasp.py"
+  python3 "$repo_root/scripts/setup/prepare-grasp.py" --install-collision
   exit 0
 fi
 if [[ "$camera_sdk" == true ]]; then

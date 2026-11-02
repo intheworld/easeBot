@@ -1,0 +1,94 @@
+{
+  "schema": "hei_agent.graph/v1",
+  "name": "right_arm_home",
+  "entry": "plan",
+  "max_steps": 5,
+  "timeout_sec": 400,
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "skill",
+      "timeout_sec": 95,
+      "inputs": {
+        "skill": "plan_arm_home",
+        "arguments": {
+          "side": "right"
+        }
+      }
+    },
+    {
+      "id": "valid",
+      "kind": "branch",
+      "inputs": {
+        "condition": {
+          "$ref": "nodes.plan.validated"
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "kind": "skill",
+      "timeout_sec": 305,
+      "inputs": {
+        "skill": "execute_arm_plan",
+        "arguments": {
+          "plan_id": {
+            "$ref": "nodes.plan.plan_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "done",
+      "kind": "end",
+      "inputs": {
+        "status": "succeeded",
+        "message": "Right arm returned to zero joint pose; gripper unchanged",
+        "outputs": {
+          "reached_goal": {
+            "$ref": "nodes.execute.reached_goal"
+          },
+          "joint_error_rad": {
+            "$ref": "nodes.execute.joint_error_rad"
+          }
+        }
+      }
+    },
+    {
+      "id": "failed",
+      "kind": "end",
+      "inputs": {
+        "status": "failed",
+        "message": "Home path validation failed; no motion dispatched",
+        "outputs": {
+          "plan_ref": {
+            "$ref": "nodes.plan.plan_ref"
+          },
+          "validation_status": {
+            "$ref": "nodes.plan.validation_status"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "plan",
+      "target": "valid"
+    },
+    {
+      "source": "valid",
+      "target": "execute",
+      "on": "true"
+    },
+    {
+      "source": "valid",
+      "target": "failed",
+      "on": "false"
+    },
+    {
+      "source": "execute",
+      "target": "done"
+    }
+  ]
+}

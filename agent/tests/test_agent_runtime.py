@@ -10,10 +10,7 @@ import pytest
 
 PACKAGE = Path(__file__).resolve().parents[1] / 'src'
 
-from hei_agent import (
-    Agent, BaseNode, Edge, Executor, FunctionNode, Graph, GraphError,
-    Node, NodeRegistry, NodeResult, RunStatus,
-)
+from hei_agent import Agent, BaseNode, Edge, FunctionNode, Graph, GraphError, Node, NodeRegistry, NodeResult, RunStatus
 from hei_agent.mock import MockConnector
 
 

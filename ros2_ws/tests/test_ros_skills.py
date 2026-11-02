@@ -123,6 +123,20 @@ def test_ros_arm_gripper_feedback_and_cancel(monkeypatch):
         assert received_trajectories[-1].points[1].velocities[0] > 0
         assert 'path' not in backend.operations
         assert await backend.grasp_gripper('close', 0., close=True) is False
+        # Actual ROS feedback supplies a continuous settle window and image-time interpolation.
+        deadline=time.monotonic()+3
+        while backend.wrist_joint_window(.15) is None:
+            assert time.monotonic()<deadline
+            await asyncio.sleep(.02)
+        image_stamp=server.get_clock().now().nanoseconds*1e-9
+        deadline=time.monotonic()+3
+        while True:
+            matched=backend.wrist_joint_state(image_stamp,max_skew_sec=.05,max_span_rad=.003)
+            if matched is not None:break
+            assert time.monotonic()<deadline
+            await asyncio.sleep(.01)
+        assert matched['right']==pytest.approx([.03]*6)
+        assert matched['before_stamp_sec']<=image_stamp<=matched['after_stamp_sec']
         delayed['value'] = True
         running = asyncio.create_task(skills.invoke('move_to_named_pose', {'side': 'left', 'pose': 'transport'},
                                         invocation='cancel', revision=skills.revision))
@@ -161,3 +175,23 @@ def test_ros_arm_gripper_feedback_and_cancel(monkeypatch):
         client.destroy_node()
         server.destroy_node()
         context.shutdown()
+
+
+def test_right_motion_ignores_left_velocity_but_keeps_lift_guard():
+    backend = RosSkillBackend.__new__(RosSkillBackend)
+    backend.lock = threading.Lock()
+    backend.joints = lambda side: [side+'_joint']
+    backend._wheel_rest_locked = lambda names, now: None
+    names = ['right_joint','left_joint','lift_joint','right_gripper_motor',
+             'left_gripper_motor','front_right_wheel_joint','rear_right_wheel_joint',
+             'rear_left_wheel_joint','front_left_wheel_joint']
+    now = time.monotonic()
+    backend.samples = {name:(0.,0.,now) for name in names}
+    backend.samples['left_joint'] = (.3, .2, now)
+    backend.samples['left_gripper_motor'] = (-1., .4, now)
+    state = backend.arm_scene_state(at_rest=False)
+    assert state['left'] == .3 and state['left_gripper'] == -1.
+    backend.arm_scene_state(at_rest=True)
+    backend.samples['lift_joint'] = (0., .1, now)
+    with pytest.raises(RuntimeError, match='moving: lift'):
+        backend.arm_scene_state(at_rest=False)

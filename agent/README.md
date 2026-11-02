@@ -367,7 +367,7 @@ asyncio 取消、重复运行保护、取消确认失败、忽略取消、JSONL�
 SDK 集成测试连接本地模拟 HTTP 服务，不请求外部 LLM、不消耗付费 token、不操作机器人；
 未安装 `llm` extra 时这些集成测试会跳过，其余测试仍可单独运行。
 
-右臂抓取只保留 OBB 流程，示例目标为蓝色方块（`blue cube`）。
+右臂抓取只保留 OBB 流程，示例目标为蓝色方块（`blue block`）。
 `src/hei_agent/examples/right_object_obb.json` 只感知，`right_obb_grasp_plan.json`
 运行感知和 IK/碰撞规划，`right_obb_grasp_execute.json` 在验证通过后运动并闭爪。
 机器人需使用 `skills.ros.grasp.json` 配置。闭爪后停在原位，不自动抬升或返回。
@@ -379,3 +379,34 @@ SDK 集成测试连接本地模拟 HTTP 服务，不请求外部 LLM、不消耗
 `execute_arm_plan`。现用抓取配置重启 bridge 后会同时发布；也可选择独立 arm 配置。
 `examples/arm_pose.json` 读取位姿，`examples/arm_position_plan.json` 只规划保持当前位置；
 执行示例为 `examples/arm_position_execute.json`。详见[末端运动说明](../docs/arm-motion.zh-CN.md)。
+
+### 搬运图的显式参数
+
+`--serve` 每行 JSON 可增加 `inputs` 对象；普通命令行可用 `--inputs '{"key":value}'`。
+参数与 `side` 一同进入图，禁止通过 `inputs.side` 覆盖不同的 `side`。
+搬运示例不内置实机放置点，缺少坐标会在执行前拒绝。
+
+- `right_arm_offset_plan.json` / `right_arm_offset.json`：相对位移规划/执行。
+- `right_arm_path_plan.json` / `right_arm_path.json`：两路点示例，可用 path 接口添加更多点。
+- `right_place_object_plan.json` / `right_place_object.json`：当前持物的放置规划/执行。
+- `right_pick_place.json`：以 `inputs.target` 指定目标，组合抓取、搬运、放置。
+- `right_carry_state.json`：只读查看机器人维护的携带状态。
+
+具体参数、状态恢复与碰撞模型见 [机械臂运动文档](../docs/arm-motion.zh-CN.md#右臂搬运与放置)。
+
+区域放置已接入机器人技能目录：`perceive_place_region` → `plan_object_placement` → `execute_place_plan`。同一个规划接口也可接受 `create_place_region` 根据操作者实测数据创建的区域。
+
+- `right_place_region_plan.json`：手中已有物体时，感知目标区域并仅规划。
+- `right_place_region.json`：感知、校验并执行放置。
+- `right_pick_place_region.json`：以 `inputs.target` 指定抓取物体，以 `inputs.destination` 指定放置目标，以 `inputs.relation` 指定关系；接近高度、撤退高度、释放开度均由 graph 内置为 0.05 m，无需任务输入；抓取后重新感知目标区域。
+- `right_declared_place_region_plan.json`：人工实测矩形区域的仅规划入口。
+
+关系 `inputs.relation` 支持 `on`（水平支撑面）和 `inside`（盒底、四周上沿可见的敞口矩形盒）。其他输入为 `approach_height_m`、`retreat_height_m`、`release_gap_m`，不再需要手填视觉目标的绝对坐标。缺少几何证据时失败，不推测隐藏盒底。输入示例、区域有效期和场景维护见 [机械臂文档](../docs/arm-motion.zh-CN.md#按区域放置桌面上盒子里)。
+
+自然语言规划会使用技能目录声明的放置默认值：`approach_height_m=0.05`、`retreat_height_m=0.05`、`release_gap_m=0.05`（米），并显式写入生成的 graph；任务中明确提供的值优先。参数范围的最小值不是默认值。
+
+`right_stack_blocks.json` 是蓝色方块叠放到红色方块上的可复用 graph 模板，不绑定历史 `catalog_revision`；每次执行仍验证当前技能接口、重新感知与规划。`on` 允许边缘悬空，但估计包围盒重心须位于支撑区域内；模板不自动执行机器人运动。
+
+### 维护示例变体
+
+计划预览和倾斜放置等变体由 `scripts/agent-example-variants.json` 声明，继承主示例中的共享参数。修改主示例后，在工程根目录执行 `python3 scripts/generate-agent-examples.py`；用 `--check` 仅检查是否同步。生成后的 JSON 仍可直接运行，现有路径保持不变。

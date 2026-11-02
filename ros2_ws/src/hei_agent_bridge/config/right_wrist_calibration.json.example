@@ -1,0 +1,12 @@
+{
+  "schema": "hei.wrist_camera/v1",
+  "camera": "right_wrist",
+  "frame_id": "right_wrist_camera_optical_frame",
+  "tool_frame": "a_right_tcp",
+  "width": null,
+  "height": null,
+  "k": [],
+  "d": [],
+  "distortion_model": "plumb_bob",
+  "T_tcp_camera": []
+}

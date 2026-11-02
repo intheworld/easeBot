@@ -12,6 +12,13 @@ import re
 from pathlib import Path
 
 
+class SkillFailure(RuntimeError):
+    """A failed execution with schema-checked evidence of completed stages."""
+    def __init__(self,message,outputs):
+        super().__init__(message)
+        self.outputs=deepcopy(outputs)
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
                                      ensure_ascii=False, allow_nan=False).encode()).hexdigest()
@@ -72,6 +79,7 @@ class SkillSet:
     """Bounded invocation ledger and local motion owner (not a global ROS lease)."""
     def __init__(self, config, backend, *, cancel_timeout=3.0, cameras=None, grasp=None, arm=None):
         self._config, self.backend = deepcopy(config), backend
+        self.carry = getattr(arm,"carry",getattr(grasp,"carry",None))
         self.cancel_timeout = cancel_timeout
         self.records = OrderedDict()
         self.blocked = False
@@ -136,6 +144,11 @@ class SkillSet:
     async def _move(self, arguments, invocation):
         if not self.backend.ready():
             raise RuntimeError('Robot feedback/controllers not ready')
+        if self.carry is not None:
+            state=getattr(self.backend,'arm_scene_state',None)
+            if state is not None:self.carry.observe(state())
+            self.carry.require_empty()
+            if self.carry.obstacles:raise RuntimeError('Known objects require a validated arm plan, not an unchecked named pose')
         pose = self._config['named_poses'][arguments['side']][arguments['pose']]
         await self.backend.move(invocation, arguments['side'], deepcopy(pose))
         return {'side': arguments['side'], 'pose': arguments['pose']}
@@ -144,6 +157,9 @@ class SkillSet:
         if not self.backend.ready():
             raise RuntimeError('Robot feedback/controllers not ready')
         position = await self.backend.gripper(invocation, arguments['side'], arguments['gap_m'])
+        if arguments['side']=='right' and self.carry is not None:
+            state=getattr(self.backend,'arm_scene_state',None)
+            if state is not None:self.carry.observe(state())
         return {'side': arguments['side'], 'position_m': position, 'reached_goal': True}
 
     def _remember(self, invocation, record):
@@ -190,6 +206,7 @@ class SkillSet:
         worker = asyncio.create_task(self._handlers[name](arguments, invocation))
         outcome, outputs, message, clean = 'failure', {}, '', True
         needs_cleanup = False
+        partial_outputs = None
         try:
             done, _ = await asyncio.wait({worker}, timeout=definition['timeout_sec'])
             if not done:
@@ -200,6 +217,13 @@ class SkillSet:
                 outcome = 'success'
         except asyncio.CancelledError:
             outcome, message, needs_cleanup = 'cancelled', 'Skill cancelled', True
+        except SkillFailure as exc:
+            message, needs_cleanup = str(exc), True
+            try:
+                fields(exc.outputs, definition['outputs'])
+                partial_outputs=deepcopy(exc.outputs)
+            except (ValueError,TypeError):
+                message += '; invalid partial-result schema'
         except Exception as exc:
             message, outputs, needs_cleanup = f'{type(exc).__name__}: {exc}', {}, True
         finally:
@@ -218,7 +242,7 @@ class SkillSet:
                 if not clean:
                     self.blocked = True
                     message += '; termination unconfirmed'
-                outputs = {}
+                outputs = partial_outputs if clean and partial_outputs is not None else {}
             if clean and self.motion_owner == invocation:
                 self.motion_owner = None
             status = 'succeeded' if outcome == 'success' else 'cancelled' if outcome == 'cancelled' else 'failed'

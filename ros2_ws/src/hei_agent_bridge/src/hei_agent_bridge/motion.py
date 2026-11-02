@@ -4,12 +4,20 @@ from collections import OrderedDict
 from copy import deepcopy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from .skills import digest
+
+
+class MotionComputeError(RuntimeError):
+    def __init__(self,message,error_code=None):
+        super().__init__(message)
+        self.error_code=error_code
 
 
 def data_directory():
@@ -18,6 +26,15 @@ def data_directory():
         return Path(get_package_share_directory('hei_agent_bridge')) / 'config'
     except (ImportError, LookupError):
         return Path(__file__).resolve().parents[2] / 'config'
+
+
+def validate_compute_config(profile):
+    for field in ('startup_warmup','persistent_worker'):
+        if field in profile and type(profile[field]) is not bool:
+            raise ValueError(field+' must be a boolean')
+    timeout=profile.get('worker_idle_timeout_sec',0)
+    if type(timeout) not in (int,float) or not math.isfinite(timeout) or timeout<0:
+        raise ValueError('worker_idle_timeout_sec must be finite and nonnegative')
 
 
 class MotionRuntime:
@@ -37,6 +54,9 @@ class MotionRuntime:
         self.plans, self.computing = OrderedDict(), False
         self._file_hashes = {}
         self.binding = self._binding()
+        self._compute_lock = asyncio.Lock()
+        self._compute_process = None
+        self.warmup_status={"status":"not_started"}
 
     def _binding(self):
         files = {}
@@ -55,9 +75,7 @@ class MotionRuntime:
 
     @staticmethod
     def scene_matches(before, after):
-        return (max(abs(a-b) for a,b in zip(before['left'], after['left'])) <= .02 and
-                abs(before['lift']-after['lift']) <= .005 and
-                abs(before['left_gripper']-after['left_gripper']) <= .02 and
+        return (abs(before['lift']-after['lift']) <= .005 and
                 max(abs(a-b) for a,b in zip(before['wheels'], after['wheels'])) <= .02)
 
     def same_start(self, before, after):
@@ -98,7 +116,95 @@ class MotionRuntime:
             motion.cancel(); guard.cancel()
             await asyncio.gather(motion, guard, return_exceptions=True)
 
+    async def warmup(self):
+        """Queue synthetic compute on the same lock/process as real requests."""
+        if not self.profile.get('startup_warmup',True) or not self.profile.get('persistent_worker',True):
+            self.warmup_status={'status':'disabled'}
+            return self.warmup_status
+        directory=self.directory/('_warmup_'+uuid.uuid4().hex)
+        self.warmup_status={'status':'warming','directory':str(directory)}
+        try:
+            directory.mkdir(parents=True)
+            (directory/'request.json').write_text(json.dumps(dict(operation='warmup',urdf=self.urdf,
+                                                                profile=self.profile),allow_nan=False))
+            result=await self._worker(directory)
+            if result.get('operation')!='warmup' or result.get('status')!='ready':
+                raise RuntimeError('Invalid compute warmup response')
+            self.warmup_status={**result,'directory':str(directory),'pid':self._compute_process.pid}
+            return self.warmup_status
+        except asyncio.CancelledError:
+            self.warmup_status={'status':'cancelled','directory':str(directory)}
+            raise
+        except Exception as exc:
+            self.warmup_status={'status':'failed','directory':str(directory),'message':str(exc)}
+            raise
+
+    async def close_worker(self):
+        process, self._compute_process = self._compute_process, None
+        if process is not None:
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(process.wait(), 1)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+            else:
+                await process.wait()
+
     async def _worker(self, directory):
+        if not self.profile.get('persistent_worker', True):
+            return await self._single_worker(directory)
+        async with self._compute_lock:
+            directory = Path(directory).resolve()
+            result = directory/'result.json'
+            result.unlink(missing_ok=True)
+            env = dict(os.environ)
+            env['HEI_COMPUTE_IDLE_TIMEOUT_SEC']=str(self.profile.get('worker_idle_timeout_sec',0))
+            for key in ('PYTHONHOME', 'PYTHONPATH', 'PYTHONNOUSERSITE'):
+                env.pop(key, None)
+            try:
+                if self._compute_process is None or self._compute_process.returncode is not None:
+                    await self.close_worker()
+                    with (directory/'worker-startup.log').open('ab') as log:
+                        spawning = asyncio.create_task(asyncio.create_subprocess_exec(
+                            self.profile['worker_python'], self.worker_script, '--serve',
+                            env=env, cwd=self.worker_cwd, stdin=asyncio.subprocess.PIPE,
+                            stdout=asyncio.subprocess.PIPE, stderr=log))
+                        try:
+                            self._compute_process = await asyncio.shield(spawning)
+                        except asyncio.CancelledError:
+                            self._compute_process = await spawning
+                            raise
+                process = self._compute_process
+                request_id = uuid.uuid4().hex
+                process.stdin.write((json.dumps({'id':request_id, 'directory':str(directory)})+'\n').encode())
+                await process.stdin.drain()
+                reply = json.loads(await asyncio.wait_for(process.stdout.readline(), 180))
+                if reply.get('id') != request_id:
+                    raise RuntimeError('Motion worker response ID mismatch')
+                (directory/'worker-timing.json').write_text(json.dumps(reply))
+                if not result.is_file() or result.stat().st_size > 2*1024*1024:
+                    raise RuntimeError(f'Motion compute failed; see {directory / "worker.log"}')
+                data = json.loads(result.read_text())
+                if reply['status'] != 0 or 'error' in data:
+                    raise MotionComputeError(data.get('error', 'Motion worker failed'), data.get('error_code'))
+                return data
+            except MotionComputeError:
+                # Expected observation/planning failures do not discard warm models.
+                raise
+            except BaseException:
+                # Never allow a cancelled request to finish in the background or
+                # have its result consumed by a later invocation.
+                await self.close_worker()
+                raise
+
+    async def _single_worker(self, directory):
+        result=directory/'result.json'
+        result.unlink(missing_ok=True)  # Every retry must consume a newly produced result.
         env = dict(os.environ)
         env.pop('PYTHONHOME', None)
         env.pop('PYTHONPATH', None)
@@ -129,6 +235,6 @@ class MotionRuntime:
             raise RuntimeError(f'Motion compute failed; see {directory / "worker.log"}')
         data = json.loads(result.read_text())
         if process.returncode != 0 or 'error' in data:
-            raise RuntimeError(data.get('error', 'Motion worker failed'))
+            raise MotionComputeError(data.get('error', 'Motion worker failed'),data.get('error_code'))
         return data
 
